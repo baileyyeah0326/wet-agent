@@ -29,7 +29,13 @@ logging.getLogger("langchain").setLevel(logging.WARNING)
 logging.getLogger("openai").setLevel(logging.WARNING)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 import os
-os.environ["OPENAI_API_KEY"] = "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"
+# API key from environment or Streamlit secrets
+if "OPENAI_API_KEY" not in os.environ:
+    try:
+        import streamlit as st
+        os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
+    except Exception:
+        pass
 
 llm = ChatOpenAI(model="gpt-4o", temperature=0.3)
 
