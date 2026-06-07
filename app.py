@@ -6,7 +6,7 @@ Deploy:       Push to GitHub → connect Streamlit Cloud
 """
 
 import streamlit as st
-from session0_with_safety import (
+from session0 import (
     create_app, start_session, run_turn, get_ai_msg,
     STEP_LABELS, _print_state,
 )
