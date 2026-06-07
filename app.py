@@ -154,6 +154,11 @@ for role, msg, label in st.session_state.chat_history:
 user_input = st.chat_input("Type your response...")
 
 if user_input:
+    # Ignore CLI commands that don't apply to web UI
+    if user_input.lower() in ("quit", "state", "db", "help", "reset", "admin"):
+        st.warning(f"'{user_input}' is a CLI command. Use the sidebar buttons instead.")
+        st.stop()
+
     # Add patient message to history
     st.session_state.chat_history.append(("patient", user_input, ""))
 
