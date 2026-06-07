@@ -37,7 +37,7 @@ if "OPENAI_API_KEY" not in os.environ:
     except Exception:
         pass
 
-llm = ChatOpenAI(model="gpt-4o", temperature=0.3)
+llm = ChatOpenAI(model="gpt-5.5", temperature=0.3)
 
 
 # ═══════════════════════════════════════════════════════════════════
