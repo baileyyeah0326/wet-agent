@@ -6,10 +6,11 @@ Deploy:       Push to GitHub → connect Streamlit Cloud
 """
 
 import streamlit as st
-from session0 import (
+from session0_with_safety import (
     create_app, start_session, run_turn, get_ai_msg,
     STEP_LABELS, _print_state,
 )
+from patient_db import DB_BACKEND
 
 # ── Page config ──
 st.set_page_config(
@@ -81,9 +82,60 @@ if not st.session_state.started:
         "Written Exposure Therapy (WET)."
     )
 
-    pid = st.text_input("Enter Patient ID:", placeholder="e.g. P001")
+    pid = st.text_input("Enter Patient ID:", placeholder="e.g. P001 or 'admin'")
 
-    if st.button("Start Session", disabled=not pid):
+    col1, col2 = st.columns(2)
+    with col1:
+        start_clicked = st.button("Start Session", disabled=not pid)
+    with col2:
+        admin_clicked = st.button("🔧 Admin Panel")
+
+    # ── Admin Panel ──
+    if admin_clicked or (start_clicked and pid.strip().lower() == "admin"):
+        st.markdown("---")
+        st.subheader("🔧 Admin Panel")
+
+        # View patient
+        st.markdown("**View Patient Record**")
+        view_pid = st.text_input("Patient ID to view:", key="admin_view")
+        if st.button("📋 View Record", key="admin_view_btn"):
+            if view_pid:
+                p = st.session_state.db.get_patient(view_pid.strip())
+                if p:
+                    st.json(p)
+                    obs = st.session_state.db.get_observations(view_pid.strip())
+                    if obs:
+                        st.markdown("**Observations:**")
+                        for o in obs:
+                            st.markdown(f"- [{o['obs_type']}] {o['content'][:200]}")
+                else:
+                    st.warning(f"Patient '{view_pid}' not found.")
+
+        st.markdown("---")
+
+        # Reset patient
+        st.markdown("**Reset Patient**")
+        reset_pid = st.text_input("Patient ID to reset:", key="admin_reset")
+        if st.button("🗑️ Reset Patient", key="admin_reset_btn"):
+            if reset_pid:
+                pid_clean = reset_pid.strip()
+                try:
+                    cur = st.session_state.db.conn.cursor()
+                    for table in ["avoidance_patterns", "clinical_observations",
+                                  "session_data", "patients"]:
+                        cur.execute(
+                            st.session_state.db._q(
+                                f"DELETE FROM {table} WHERE patient_id = ?"),
+                            (pid_clean,))
+                    if DB_BACKEND != "postgres":
+                        st.session_state.db.conn.commit()
+                    st.success(f"Patient '{pid_clean}' deleted.")
+                except Exception as e:
+                    st.error(f"Error: {e}")
+
+        st.stop()
+
+    if start_clicked and pid.strip().lower() != "admin":
         st.session_state.pid = pid.strip()
 
         result = start_session(
