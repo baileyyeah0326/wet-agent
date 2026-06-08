@@ -6,7 +6,7 @@ Deploy:       Push to GitHub → connect Streamlit Cloud
 """
 
 import streamlit as st
-from session0 import (
+from session0_with_safety import (
     create_app, start_session, run_turn, get_ai_msg,
     STEP_LABELS, _print_state,
 )
@@ -133,6 +133,14 @@ if st.session_state.session_ended:
         if p:
             st.json(p)
 
+    if st.button("🔄 New Patient"):
+        st.session_state.started = False
+        st.session_state.chat_history = []
+        st.session_state.session_ended = False
+        st.session_state.end_reason = None
+        st.session_state.pid = None
+        st.rerun()
+
     st.stop()
 
 
@@ -154,11 +162,6 @@ for role, msg, label in st.session_state.chat_history:
 user_input = st.chat_input("Type your response...")
 
 if user_input:
-    # Ignore CLI commands that don't apply to web UI
-    if user_input.lower() in ("quit", "state", "db", "help", "reset", "admin"):
-        st.warning(f"'{user_input}' is a CLI command. Use the sidebar buttons instead.")
-        st.stop()
-
     # Add patient message to history
     st.session_state.chat_history.append(("patient", user_input, ""))
 
@@ -209,3 +212,13 @@ with st.sidebar:
             st.json(p)
         else:
             st.warning("Patient not found in DB.")
+
+    st.markdown("---")
+
+    if st.button("🚪 End Session"):
+        st.session_state.started = False
+        st.session_state.chat_history = []
+        st.session_state.session_ended = False
+        st.session_state.end_reason = None
+        st.session_state.pid = None
+        st.rerun()
