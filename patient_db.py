@@ -1,118 +1,178 @@
 """
-Patient Database — SQLite persistent storage for clinical data.
+Patient Database — supports PostgreSQL (cloud) and SQLite (local).
 
-Stores patient profiles and session data independently of LangGraph's
-checkpointer. This means:
-- LangGraph SqliteSaver handles conversation state (messages, step position)
-- PatientDB handles clinical data (scores, trauma, goals, summaries)
-
-The two are complementary:
-- Checkpointer = "where are we in the conversation right now?"
-- PatientDB = "what do we know about this patient across all sessions?"
+Automatically selects backend:
+  - DATABASE_URL set → PostgreSQL (Supabase/cloud, data persists forever)
+  - Otherwise → SQLite (local file, data persists on disk)
 """
 
-import sqlite3
 import json
+import os
 from datetime import datetime
-from pathlib import Path
+
+# ── Select database backend ──
+DATABASE_URL = None
+try:
+    import streamlit as _st
+    DATABASE_URL = _st.secrets.get("DATABASE_URL")
+except Exception:
+    pass
+
+if not DATABASE_URL:
+    DATABASE_URL = os.environ.get("DATABASE_URL")
+
+if DATABASE_URL and DATABASE_URL.startswith("postgresql"):
+    import psycopg2
+    DB_BACKEND = "postgres"
+else:
+    import sqlite3
+    DB_BACKEND = "sqlite"
 
 
 class PatientDB:
-    """SQLite database for persistent patient clinical data."""
 
     def __init__(self, db_path: str = "wet_patients.db"):
         self.db_path = db_path
-        self.conn = sqlite3.connect(db_path, check_same_thread=False)
-        self.conn.row_factory = sqlite3.Row
+        if DB_BACKEND == "postgres":
+            self.conn = psycopg2.connect(DATABASE_URL)
+            self.conn.autocommit = True
+            self._p = "%s"
+        else:
+            self.conn = sqlite3.connect(db_path, check_same_thread=False)
+            self.conn.row_factory = sqlite3.Row
+            self._p = "?"
         self._init_tables()
 
+    def _q(self, sql):
+        if DB_BACKEND == "postgres":
+            return sql.replace("?", "%s")
+        return sql
+
+    def _fetchone(self, cur):
+        if DB_BACKEND == "postgres":
+            if cur.description is None:
+                return None
+            cols = [d[0] for d in cur.description]
+            row = cur.fetchone()
+            return dict(zip(cols, row)) if row else None
+        else:
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+    def _fetchall(self, cur):
+        if DB_BACKEND == "postgres":
+            if cur.description is None:
+                return []
+            cols = [d[0] for d in cur.description]
+            return [dict(zip(cols, row)) for row in cur.fetchall()]
+        else:
+            return [dict(row) for row in cur.fetchall()]
+
     def _init_tables(self):
-        """Create tables if they don't exist."""
-        self.conn.executescript("""
-            CREATE TABLE IF NOT EXISTS patients (
-                patient_id TEXT PRIMARY KEY,
-                created_at TEXT NOT NULL,
-                index_trauma TEXT DEFAULT '',
-                trauma_described INTEGER DEFAULT 0,
-                trauma_bookends TEXT DEFAULT '{}',
-                therapy_goals TEXT DEFAULT '[]',
-                reason_for_therapy TEXT DEFAULT '',
-                modality TEXT DEFAULT '',
-                current_session INTEGER DEFAULT 0,
-                treatment_complete INTEGER DEFAULT 0
-            );
+        cur = self.conn.cursor()
+        if DB_BACKEND == "postgres":
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS patients (
+                    patient_id TEXT PRIMARY KEY,
+                    created_at TEXT NOT NULL,
+                    index_trauma TEXT DEFAULT '',
+                    trauma_described INTEGER DEFAULT 0,
+                    trauma_bookends TEXT DEFAULT '{}',
+                    therapy_goals TEXT DEFAULT '[]',
+                    reason_for_therapy TEXT DEFAULT '',
+                    modality TEXT DEFAULT '',
+                    current_session INTEGER DEFAULT 0,
+                    treatment_complete INTEGER DEFAULT 0
+                )""")
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS session_data (
+                    id SERIAL PRIMARY KEY,
+                    patient_id TEXT NOT NULL,
+                    session_num INTEGER NOT NULL,
+                    completed_at TEXT,
+                    pcl5_score INTEGER,
+                    phq9_score INTEGER,
+                    suds_pre INTEGER,
+                    suds_post INTEGER,
+                    narrative TEXT,
+                    narrative_feedback TEXT DEFAULT '{}',
+                    session_summary TEXT DEFAULT ''
+                )""")
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS clinical_observations (
+                    id SERIAL PRIMARY KEY,
+                    patient_id TEXT NOT NULL,
+                    session_num INTEGER NOT NULL,
+                    obs_type TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                )""")
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS avoidance_patterns (
+                    id SERIAL PRIMARY KEY,
+                    patient_id TEXT NOT NULL,
+                    session_num INTEGER NOT NULL,
+                    pattern TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                )""")
+        else:
+            cur.executescript("""
+                CREATE TABLE IF NOT EXISTS patients (
+                    patient_id TEXT PRIMARY KEY, created_at TEXT NOT NULL,
+                    index_trauma TEXT DEFAULT '', trauma_described INTEGER DEFAULT 0,
+                    trauma_bookends TEXT DEFAULT '{}', therapy_goals TEXT DEFAULT '[]',
+                    reason_for_therapy TEXT DEFAULT '', modality TEXT DEFAULT '',
+                    current_session INTEGER DEFAULT 0, treatment_complete INTEGER DEFAULT 0
+                );
+                CREATE TABLE IF NOT EXISTS session_data (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, patient_id TEXT NOT NULL,
+                    session_num INTEGER NOT NULL, completed_at TEXT,
+                    pcl5_score INTEGER, phq9_score INTEGER,
+                    suds_pre INTEGER, suds_post INTEGER, narrative TEXT,
+                    narrative_feedback TEXT DEFAULT '{}', session_summary TEXT DEFAULT ''
+                );
+                CREATE TABLE IF NOT EXISTS clinical_observations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, patient_id TEXT NOT NULL,
+                    session_num INTEGER NOT NULL, obs_type TEXT NOT NULL,
+                    content TEXT NOT NULL, created_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS avoidance_patterns (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, patient_id TEXT NOT NULL,
+                    session_num INTEGER NOT NULL, pattern TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+            """)
+            self.conn.commit()
 
-            CREATE TABLE IF NOT EXISTS session_data (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                patient_id TEXT NOT NULL,
-                session_num INTEGER NOT NULL,
-                completed_at TEXT,
-                pcl5_score INTEGER,
-                phq9_score INTEGER,
-                suds_pre INTEGER,
-                suds_post INTEGER,
-                narrative TEXT,
-                narrative_feedback TEXT DEFAULT '{}',
-                session_summary TEXT DEFAULT '',
-                FOREIGN KEY (patient_id) REFERENCES patients(patient_id)
-            );
-
-            CREATE TABLE IF NOT EXISTS clinical_observations (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                patient_id TEXT NOT NULL,
-                session_num INTEGER NOT NULL,
-                obs_type TEXT NOT NULL,
-                content TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                FOREIGN KEY (patient_id) REFERENCES patients(patient_id)
-            );
-
-            CREATE TABLE IF NOT EXISTS avoidance_patterns (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                patient_id TEXT NOT NULL,
-                session_num INTEGER NOT NULL,
-                pattern TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                FOREIGN KEY (patient_id) REFERENCES patients(patient_id)
-            );
-        """)
-        self.conn.commit()
-
-    # ── Patient CRUD ──────────────────────────────────────────────
-
-    def create_patient(self, patient_id: str) -> dict:
-        """Create a new patient record. Returns patient dict."""
+    def create_patient(self, patient_id):
         now = datetime.now().isoformat()
         try:
-            self.conn.execute(
-                "INSERT INTO patients (patient_id, created_at) VALUES (?, ?)",
+            cur = self.conn.cursor()
+            cur.execute(self._q("INSERT INTO patients (patient_id, created_at) VALUES (?, ?)"),
                 (patient_id, now))
-            self.conn.commit()
-        except sqlite3.IntegrityError:
-            pass  # patient already exists
+            if DB_BACKEND != "postgres":
+                self.conn.commit()
+        except Exception:
+            if DB_BACKEND == "postgres":
+                self.conn.rollback()
         return self.get_patient(patient_id)
 
-    def get_patient(self, patient_id: str) -> dict | None:
-        """Get patient profile."""
-        row = self.conn.execute(
-            "SELECT * FROM patients WHERE patient_id = ?",
-            (patient_id,)).fetchone()
-        if not row:
+    def get_patient(self, patient_id):
+        cur = self.conn.cursor()
+        cur.execute(self._q("SELECT * FROM patients WHERE patient_id = ?"), (patient_id,))
+        p = self._fetchone(cur)
+        if not p:
             return None
-        p = dict(row)
         p["trauma_bookends"] = json.loads(p["trauma_bookends"])
         p["therapy_goals"] = json.loads(p["therapy_goals"])
         p["trauma_described"] = bool(p["trauma_described"])
         p["treatment_complete"] = bool(p["treatment_complete"])
         return p
 
-    def update_patient(self, patient_id: str, **kwargs):
-        """Update patient profile fields."""
-        allowed = {
-            "index_trauma", "trauma_described", "trauma_bookends",
-            "therapy_goals", "reason_for_therapy", "modality",
-            "current_session", "treatment_complete",
-        }
+    def update_patient(self, patient_id, **kwargs):
+        allowed = {"index_trauma", "trauma_described", "trauma_bookends",
+                    "therapy_goals", "reason_for_therapy", "modality",
+                    "current_session", "treatment_complete"}
         updates = {}
         for k, v in kwargs.items():
             if k not in allowed:
@@ -121,58 +181,45 @@ class PatientDB:
                 updates[k] = json.dumps(v) if isinstance(v, dict) else v
             elif k == "therapy_goals":
                 updates[k] = json.dumps(v) if isinstance(v, list) else v
-            elif k == "trauma_described" or k == "treatment_complete":
+            elif k in ("trauma_described", "treatment_complete"):
                 updates[k] = 1 if v else 0
             else:
                 updates[k] = v
-
         if not updates:
             return
-
-        set_clause = ", ".join(f"{k} = ?" for k in updates)
+        set_clause = ", ".join(f"{k} = {self._p}" for k in updates)
         values = list(updates.values()) + [patient_id]
-        self.conn.execute(
-            f"UPDATE patients SET {set_clause} WHERE patient_id = ?",
-            values)
-        self.conn.commit()
+        cur = self.conn.cursor()
+        cur.execute(f"UPDATE patients SET {set_clause} WHERE patient_id = {self._p}", values)
+        if DB_BACKEND != "postgres":
+            self.conn.commit()
 
-    # ── Session Data ──────────────────────────────────────────────
-
-    def save_session(self, patient_id: str, session_num: int,
-                     pcl5_score: int = None, phq9_score: int = None,
-                     suds_pre: int = None, suds_post: int = None,
-                     narrative: str = None,
-                     narrative_feedback: dict = None,
-                     session_summary: str = ""):
-        """Save session data after a session completes."""
-        self.conn.execute("""
+    def save_session(self, patient_id, session_num, pcl5_score=None,
+                     phq9_score=None, suds_pre=None, suds_post=None,
+                     narrative=None, narrative_feedback=None, session_summary=""):
+        cur = self.conn.cursor()
+        cur.execute(self._q("""
             INSERT INTO session_data
             (patient_id, session_num, completed_at, pcl5_score, phq9_score,
              suds_pre, suds_post, narrative, narrative_feedback, session_summary)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            patient_id, session_num, datetime.now().isoformat(),
-            pcl5_score, phq9_score, suds_pre, suds_post,
-            narrative,
+        """), (patient_id, session_num, datetime.now().isoformat(),
+            pcl5_score, phq9_score, suds_pre, suds_post, narrative,
             json.dumps(narrative_feedback) if narrative_feedback else "{}",
-            session_summary,
-        ))
-        self.conn.commit()
+            session_summary))
+        if DB_BACKEND != "postgres":
+            self.conn.commit()
 
-    def get_sessions(self, patient_id: str) -> list[dict]:
-        """Get all session data for a patient, ordered by session number."""
-        rows = self.conn.execute(
-            "SELECT * FROM session_data WHERE patient_id = ? ORDER BY session_num",
-            (patient_id,)).fetchall()
-        result = []
-        for row in rows:
-            d = dict(row)
+    def get_sessions(self, patient_id):
+        cur = self.conn.cursor()
+        cur.execute(self._q("SELECT * FROM session_data WHERE patient_id = ? ORDER BY session_num"),
+            (patient_id,))
+        result = self._fetchall(cur)
+        for d in result:
             d["narrative_feedback"] = json.loads(d["narrative_feedback"])
-            result.append(d)
         return result
 
-    def get_score_trajectory(self, patient_id: str) -> dict:
-        """Get PCL-5 and PHQ-9 score trajectories."""
+    def get_score_trajectory(self, patient_id):
         sessions = self.get_sessions(patient_id)
         return {
             "pcl5": [s["pcl5_score"] for s in sessions if s["pcl5_score"] is not None],
@@ -181,82 +228,58 @@ class PatientDB:
             "suds_post": [s["suds_post"] for s in sessions if s["suds_post"] is not None],
         }
 
-    # ── Clinical Observations ─────────────────────────────────────
-
-    def add_observation(self, patient_id: str, session_num: int,
-                        obs_type: str, content: str):
-        """Add a clinical observation."""
-        self.conn.execute("""
+    def add_observation(self, patient_id, session_num, obs_type, content):
+        cur = self.conn.cursor()
+        cur.execute(self._q("""
             INSERT INTO clinical_observations
             (patient_id, session_num, obs_type, content, created_at)
             VALUES (?, ?, ?, ?, ?)
-        """, (patient_id, session_num, obs_type, content,
-              datetime.now().isoformat()))
-        self.conn.commit()
+        """), (patient_id, session_num, obs_type, content, datetime.now().isoformat()))
+        if DB_BACKEND != "postgres":
+            self.conn.commit()
 
-    def get_observations(self, patient_id: str,
-                         session_num: int = None) -> list[dict]:
-        """Get clinical observations. Optionally filter by session."""
+    def get_observations(self, patient_id, session_num=None):
+        cur = self.conn.cursor()
         if session_num is not None:
-            rows = self.conn.execute(
-                "SELECT * FROM clinical_observations "
-                "WHERE patient_id = ? AND session_num = ? ORDER BY id",
-                (patient_id, session_num)).fetchall()
+            cur.execute(self._q(
+                "SELECT * FROM clinical_observations WHERE patient_id = ? AND session_num = ? ORDER BY id"),
+                (patient_id, session_num))
         else:
-            rows = self.conn.execute(
-                "SELECT * FROM clinical_observations "
-                "WHERE patient_id = ? ORDER BY id",
-                (patient_id,)).fetchall()
-        return [dict(r) for r in rows]
+            cur.execute(self._q(
+                "SELECT * FROM clinical_observations WHERE patient_id = ? ORDER BY id"),
+                (patient_id,))
+        return self._fetchall(cur)
 
-    # ── Avoidance Patterns ────────────────────────────────────────
-
-    def add_avoidance_pattern(self, patient_id: str, session_num: int,
-                              pattern: str):
-        """Add an avoidance pattern."""
-        self.conn.execute("""
+    def add_avoidance_pattern(self, patient_id, session_num, pattern):
+        cur = self.conn.cursor()
+        cur.execute(self._q("""
             INSERT INTO avoidance_patterns
             (patient_id, session_num, pattern, created_at)
             VALUES (?, ?, ?, ?)
-        """, (patient_id, session_num, pattern,
-              datetime.now().isoformat()))
-        self.conn.commit()
+        """), (patient_id, session_num, pattern, datetime.now().isoformat()))
+        if DB_BACKEND != "postgres":
+            self.conn.commit()
 
-    def get_avoidance_patterns(self, patient_id: str) -> list[dict]:
-        """Get all avoidance patterns across sessions."""
-        rows = self.conn.execute(
-            "SELECT * FROM avoidance_patterns WHERE patient_id = ? ORDER BY id",
-            (patient_id,)).fetchall()
-        return [dict(r) for r in rows]
+    def get_avoidance_patterns(self, patient_id):
+        cur = self.conn.cursor()
+        cur.execute(self._q("SELECT * FROM avoidance_patterns WHERE patient_id = ? ORDER BY id"),
+            (patient_id,))
+        return self._fetchall(cur)
 
-    # ── Session Summaries ─────────────────────────────────────────
-
-    def get_session_summaries(self, patient_id: str) -> list[str]:
-        """Get all session summaries for building context."""
-        rows = self.conn.execute(
+    def get_session_summaries(self, patient_id):
+        cur = self.conn.cursor()
+        cur.execute(self._q(
             "SELECT session_num, session_summary FROM session_data "
-            "WHERE patient_id = ? AND session_summary != '' "
-            "ORDER BY session_num",
-            (patient_id,)).fetchall()
-        return [{"session": r["session_num"], "summary": r["session_summary"]}
-                for r in rows]
+            "WHERE patient_id = ? AND session_summary != '' ORDER BY session_num"),
+            (patient_id,))
+        rows = self._fetchall(cur)
+        return [{"session": r["session_num"], "summary": r["session_summary"]} for r in rows]
 
-    # ── Build Context for LLM ─────────────────────────────────────
-
-    def build_session_context(self, patient_id: str) -> str:
-        """Build a context string from patient history for LLM system prompt.
-        
-        Used at the start of each new session to give the agent
-        continuity without replaying old conversations.
-        """
+    def build_session_context(self, patient_id):
         patient = self.get_patient(patient_id)
         if not patient:
             return "New patient. No history."
-
-        parts = []
-        parts.append(f"Patient ID: {patient_id}")
-        parts.append(f"Current session: {patient['current_session']}")
-
+        parts = [f"Patient ID: {patient_id}", f"Current session: {patient['current_session']}"]
         if patient["reason_for_therapy"]:
             parts.append(f"Reason: {patient['reason_for_therapy']}")
         if patient["index_trauma"]:
@@ -265,94 +288,39 @@ class PatientDB:
             parts.append(f"Goals: {', '.join(patient['therapy_goals'])}")
         if patient["trauma_bookends"]:
             parts.append(f"Bookends: {patient['trauma_bookends']}")
-
-        # Score trajectory
-        traj = self.get_score_trajectory(patient_id)
-        if traj["pcl5"]:
-            parts.append(f"PCL-5 trajectory: {traj['pcl5']}")
-        if traj["phq9"]:
-            parts.append(f"PHQ-9 trajectory: {traj['phq9']}")
-
-        # Avoidance patterns
         patterns = self.get_avoidance_patterns(patient_id)
         if patterns:
-            p_list = [p["pattern"] for p in patterns]
-            parts.append(f"Avoidance patterns: {p_list}")
-
-        # Session summaries
+            parts.append(f"Avoidance patterns: {[p['pattern'] for p in patterns]}")
         summaries = self.get_session_summaries(patient_id)
         for s in summaries:
             parts.append(f"\n--- Session {s['session']} Summary ---\n{s['summary']}")
-
         return "\n".join(parts)
 
-    # ── Sync from WETState (called after session completes) ───────
-
-    def sync_from_state(self, patient_id: str, state: dict):
-        """Sync WETState data to database after session completes.
-        
-        Called after step13_closing. Writes all extracted data to DB.
-        """
+    def sync_from_state(self, patient_id, state):
         session_num = state.get("current_session", 0)
-
-        # Update patient profile
         self.update_patient(patient_id,
             index_trauma=state.get("index_trauma", ""),
             trauma_described=state.get("trauma_described", False),
             trauma_bookends=state.get("trauma_bookends", {}),
             therapy_goals=state.get("therapy_goals", []),
             reason_for_therapy=state.get("reason_for_therapy", ""),
-            current_session=session_num + 1,  # ready for next session
-        )
-
-        # Save session data
+            current_session=session_num + 1)
         summaries = state.get("session_summaries", [])
-        summary_text = ""
-        if summaries:
-            latest = summaries[-1]
-            summary_text = latest.get("summary", "")
-
-        self.save_session(
-            patient_id=patient_id,
-            session_num=session_num,
-            session_summary=summary_text,
-        )
-
-        # Save observations
+        summary_text = summaries[-1].get("summary", "") if summaries else ""
+        self.save_session(patient_id, session_num, session_summary=summary_text)
         for obs in state.get("clinical_observations", []):
-            self.add_observation(
-                patient_id=patient_id,
-                session_num=session_num,
-                obs_type=obs.get("type", ""),
-                content=obs.get("content", ""),
-            )
-
-        # Save avoidance patterns
+            self.add_observation(patient_id, session_num, obs.get("type", ""), obs.get("content", ""))
         for ap in state.get("avoidance_patterns", []):
-            self.add_avoidance_pattern(
-                patient_id=patient_id,
-                session_num=ap.get("session", session_num),
-                pattern=ap.get("pattern", ""),
-            )
-
-    # ── Utility ───────────────────────────────────────────────────
+            self.add_avoidance_pattern(patient_id, ap.get("session", session_num), ap.get("pattern", ""))
 
     def close(self):
         self.conn.close()
 
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *args):
-        self.close()
-
-    def print_patient_summary(self, patient_id: str):
-        """Print a human-readable patient summary matching _print_state format."""
+    def print_patient_summary(self, patient_id):
         p = self.get_patient(patient_id)
         if not p:
             print(f"  Patient {patient_id} not found in database.")
             return
-
         print(f"  ┌─── DB: Patient {patient_id} ──────────────────────")
         print(f"  │ created:           {p['created_at']}")
         print(f"  │ current_session:   {p['current_session']}")
@@ -361,45 +329,19 @@ class PatientDB:
         print(f"  │ index_trauma:      {p['index_trauma'] or '—'}")
         print(f"  │ therapy_goals:     {p['therapy_goals'] or '—'}")
         print(f"  │ trauma_bookends:   {p['trauma_bookends'] or '—'}")
-
-        # Avoidance patterns
         patterns = self.get_avoidance_patterns(patient_id)
-        if patterns:
-            print(f"  │ avoidance_patterns: {[ap['pattern'] for ap in patterns]}")
-        else:
-            print(f"  │ avoidance_patterns: —")
-
-        # Score trajectory
+        print(f"  │ avoidance_patterns: {[ap['pattern'] for ap in patterns] if patterns else '—'}")
         traj = self.get_score_trajectory(patient_id)
         print(f"  │ pcl5_scores:      {traj['pcl5'] or '—'}")
-        print(f"  │ phq9_scores:      {traj['phq9'] or '—'}")
-        print(f"  │ suds_pre:         {traj['suds_pre'] or '—'}")
-        print(f"  │ suds_post:        {traj['suds_post'] or '—'}")
-
-        # Session summaries
         summaries = self.get_session_summaries(patient_id)
         if summaries:
             print(f"  │ session_summaries: {len(summaries)}")
             for s in summaries:
-                print(f"  │   S{s['session']}: {s['summary']}...")
+                print(f"  │   S{s['session']}: {s['summary'][:80]}...")
         else:
             print(f"  │ session_summaries: —")
-
-        # Observations (show all with type)
         obs = self.get_observations(patient_id)
         print(f"  │ observations:      {len(obs)}")
         for o in obs:
             print(f"  │   [{o['obs_type']}] {o['content']}")
-
-        # Session data
-        sessions = self.get_sessions(patient_id)
-        if sessions:
-            print(f"  │ sessions:         {len(sessions)}")
-            for s in sessions:
-                print(f"  │   S{s['session_num']}: "
-                      f"pcl5={s['pcl5_score']}, phq9={s['phq9_score']}, "
-                      f"suds={s['suds_pre']}→{s['suds_post']}")
-        else:
-            print(f"  │ sessions:         —")
-
         print(f"  └────────────────────────────────────────────")
