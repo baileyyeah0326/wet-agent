@@ -82,16 +82,21 @@ if not st.session_state.started:
         "Written Exposure Therapy (WET)."
     )
 
-    pid = st.text_input("Enter Patient ID:", placeholder="e.g. P001 or 'admin'")
+    pid = st.text_input("Enter Patient ID:", placeholder="e.g. P001")
+
+    if "admin_mode" not in st.session_state:
+        st.session_state.admin_mode = False
 
     col1, col2 = st.columns(2)
     with col1:
         start_clicked = st.button("Start Session", disabled=not pid)
     with col2:
-        admin_clicked = st.button("🔧 Admin Panel")
+        if st.button("🔧 Admin Panel"):
+            st.session_state.admin_mode = True
+            st.rerun()
 
     # ── Admin Panel ──
-    if admin_clicked or (start_clicked and pid.strip().lower() == "admin"):
+    if st.session_state.admin_mode:
         st.markdown("---")
         st.subheader("🔧 Admin Panel")
 
@@ -156,7 +161,9 @@ if not st.session_state.started:
             st.session_state.started = True
 
         st.rerun()
-
+    if st.button("← Back to Login"):
+        st.session_state.admin_mode = False
+        st.rerun()
     st.stop()
 
 
