@@ -164,10 +164,15 @@ if not st.session_state.started:
             st.session_state.end_reason = "complete"
             st.session_state.started = True
         else:
-            ai_msg = get_ai_msg(result)
-            label = get_step_label(result)
-            st.session_state.chat_history.append(
-                ("therapist", ai_msg, label))
+            # Rebuild chat history from LangGraph message history
+            from langchain_core.messages import AIMessage, HumanMessage
+            for msg in result.get("messages", []):
+                if isinstance(msg, AIMessage):
+                    st.session_state.chat_history.append(
+                        ("therapist", msg.content, ""))
+                elif isinstance(msg, HumanMessage):
+                    st.session_state.chat_history.append(
+                        ("patient", msg.content, ""))
             st.session_state.started = True
 
         st.rerun()
