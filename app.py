@@ -1,25 +1,21 @@
 """
 WET Agent — Session 0 (Streamlit Web UI)
-
-Run locally:  streamlit run app.py
-Deploy:       Push to GitHub → connect Streamlit Cloud
 """
 
 import streamlit as st
+import time
 from session0 import (
     create_app, start_session, run_turn, get_ai_msg,
     STEP_LABELS,
 )
 from patient_db import DB_BACKEND
 
-# ── Page config ──
 st.set_page_config(
     page_title="WET Therapy — Session 0",
     page_icon="🧠",
     layout="centered",
 )
 
-# ── Custom CSS ──
 st.markdown("""
 <style>
     .stApp { max-width: 800px; margin: 0 auto; }
@@ -39,7 +35,6 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-
 # ── Session state init ──
 if "app" not in st.session_state:
     app, db = create_app()
@@ -51,6 +46,7 @@ if "app" not in st.session_state:
     st.session_state.session_ended = False
     st.session_state.end_reason = None
     st.session_state.admin_mode = False
+    st.session_state.pending_input = None
 
 
 def get_step_label(result):
@@ -66,6 +62,44 @@ def reset_to_login():
     st.session_state.end_reason = None
     st.session_state.pid = None
     st.session_state.admin_mode = False
+    st.session_state.pending_input = None
+
+
+def display_chat_history():
+    for role, msg, label in st.session_state.chat_history:
+        if role == "therapist":
+            st.markdown(f'<div class="step-label">{label}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="therapist-msg">{msg}</div>', unsafe_allow_html=True)
+        elif role == "safety":
+            st.markdown(f'<div class="safety-msg">{msg}</div>', unsafe_allow_html=True)
+        else:
+            st.markdown(f'<div class="patient-msg">{msg}</div>', unsafe_allow_html=True)
+
+
+def fake_stream(text, css_class="therapist-msg"):
+    placeholder = st.empty()
+    displayed = ""
+    for char in text:
+        displayed += char
+        placeholder.markdown(
+            f'<div class="{css_class}">{displayed}▌</div>',
+            unsafe_allow_html=True)
+        time.sleep(0.015)
+    placeholder.markdown(
+        f'<div class="{css_class}">{displayed}</div>',
+        unsafe_allow_html=True)
+
+
+def rebuild_chat_from_messages(result):
+    from langchain_core.messages import AIMessage, HumanMessage
+    for msg in result.get("messages", []):
+        if isinstance(msg, AIMessage):
+            label = msg.additional_kwargs.get("step_label", "")
+            st.session_state.chat_history.append(
+                ("therapist", msg.content, label))
+        elif isinstance(msg, HumanMessage):
+            st.session_state.chat_history.append(
+                ("patient", msg.content, ""))
 
 
 # ══════════════════════════════════════════════════════
@@ -80,7 +114,7 @@ if st.session_state.admin_mode:
 
     st.markdown("---")
 
-    # ── View Patient Record ──
+    # View Patient
     st.subheader("📋 View Patient Record")
     view_pid = st.text_input("Patient ID to view:", key="admin_view")
     if st.button("View Record"):
@@ -103,7 +137,7 @@ if st.session_state.admin_mode:
 
     st.markdown("---")
 
-    # ── Reset Patient ──
+    # Reset Patient
     st.subheader("🗑️ Reset Patient")
     reset_pid = st.text_input("Patient ID to reset:", key="admin_reset")
     if st.button("Delete Patient Data"):
@@ -122,9 +156,10 @@ if st.session_state.admin_mode:
                 st.success(f"✅ Patient '{pid_clean}' deleted.")
             except Exception as e:
                 st.error(f"Error: {e}")
+
     st.markdown("---")
 
-    # ── Reset All Data ──
+    # Reset All
     st.subheader("⚠️ Reset All Data")
     st.warning("This will delete ALL patients and ALL session data permanently.")
     confirm = st.text_input("Type 'DELETE ALL' to confirm:", key="admin_reset_all")
@@ -142,6 +177,7 @@ if st.session_state.admin_mode:
                 st.error(f"Error: {e}")
         else:
             st.error("Please type 'DELETE ALL' to confirm.")
+
     st.stop()
 
 
@@ -155,43 +191,38 @@ if not st.session_state.started:
         "Written Exposure Therapy (WET)."
     )
 
-    pid = st.text_input("Enter Patient ID:", placeholder="e.g. P001")
+    with st.form("login_form"):
+        pid = st.text_input("Enter Patient ID:", placeholder="e.g. P001")
+        start_clicked = st.form_submit_button("Start Session")
 
-    col1, col2 = st.columns(2)
-    with col1:
-        start_clicked = st.button("Start Session", disabled=not pid)
-    with col2:
-        if st.button("🔧 Admin Panel"):
-            st.session_state.admin_mode = True
-            st.rerun()
+    if st.button("🔧 Admin Panel"):
+        st.session_state.admin_mode = True
+        st.rerun()
 
     if start_clicked:
+        if not pid or not pid.strip():
+            st.error("Please enter a Patient ID.")
+            st.stop()
+
         st.session_state.pid = pid.strip()
 
         try:
-            result = start_session(
-                st.session_state.app,
-                st.session_state.db,
-                st.session_state.pid)
+            with st.spinner("Starting session..."):
+                result = start_session(
+                    st.session_state.app,
+                    st.session_state.db,
+                    st.session_state.pid)
         except Exception as e:
             st.error(f"Error starting session: {str(e)[:200]}")
             st.stop()
 
         if result.get("session_complete"):
-            st.warning(f"Session 0 is already complete for {pid}.")
+            rebuild_chat_from_messages(result)
             st.session_state.session_ended = True
             st.session_state.end_reason = "complete"
             st.session_state.started = True
         else:
-            # Rebuild chat history from LangGraph message history
-            from langchain_core.messages import AIMessage, HumanMessage
-            for msg in result.get("messages", []):
-                if isinstance(msg, AIMessage):
-                    st.session_state.chat_history.append(
-                        ("therapist", msg.content, ""))
-                elif isinstance(msg, HumanMessage):
-                    st.session_state.chat_history.append(
-                        ("patient", msg.content, ""))
+            rebuild_chat_from_messages(result)
             st.session_state.started = True
 
         st.rerun()
@@ -205,14 +236,7 @@ if not st.session_state.started:
 if st.session_state.session_ended:
     st.title("🧠 WET Therapy — Session 0")
 
-    for role, msg, label in st.session_state.chat_history:
-        if role == "therapist":
-            st.markdown(f'<div class="step-label">{label}</div>', unsafe_allow_html=True)
-            st.markdown(f'<div class="therapist-msg">{msg}</div>', unsafe_allow_html=True)
-        elif role == "safety":
-            st.markdown(f'<div class="safety-msg">{msg}</div>', unsafe_allow_html=True)
-        else:
-            st.markdown(f'<div class="patient-msg">{msg}</div>', unsafe_allow_html=True)
+    display_chat_history()
 
     if st.session_state.end_reason == "safety":
         st.error("⚠️ Session paused — patient referred to human clinician.")
@@ -237,27 +261,20 @@ if st.session_state.session_ended:
 st.title("🧠 WET Therapy — Session 0")
 st.caption(f"Patient: {st.session_state.pid}")
 
-# Display chat history
-for role, msg, label in st.session_state.chat_history:
-    if role == "therapist":
-        st.markdown(f'<div class="step-label">{label}</div>', unsafe_allow_html=True)
-        st.markdown(f'<div class="therapist-msg">{msg}</div>', unsafe_allow_html=True)
-    elif role == "safety":
-        st.markdown(f'<div class="safety-msg">{msg}</div>', unsafe_allow_html=True)
-    else:
-        st.markdown(f'<div class="patient-msg">{msg}</div>', unsafe_allow_html=True)
+# Display all previous messages
+display_chat_history()
 
-# Chat input
-user_input = st.chat_input("Type your response...")
-
-if user_input:
-    st.session_state.chat_history.append(("patient", user_input, ""))
+# Phase 2: Process pending input (patient message already visible)
+if st.session_state.pending_input:
+    user_input = st.session_state.pending_input
+    st.session_state.pending_input = None
 
     try:
-        result = run_turn(
-            st.session_state.app,
-            st.session_state.pid,
-            user_input)
+        with st.spinner("Therapist is thinking..."):
+            result = run_turn(
+                st.session_state.app,
+                st.session_state.pid,
+                user_input)
     except Exception as e:
         st.error(f"An error occurred: {str(e)[:200]}. Please try again.")
         st.stop()
@@ -266,16 +283,37 @@ if user_input:
     label = get_step_label(result)
 
     if result.get("current_step") == "safety_stop":
+        st.markdown(f'<div class="step-label">⚠️ Safety</div>', unsafe_allow_html=True)
+        fake_stream(ai_msg, "safety-msg")
         st.session_state.chat_history.append(("safety", ai_msg, "⚠️ Safety"))
         st.session_state.session_ended = True
         st.session_state.end_reason = "safety"
+        time.sleep(1)
+        st.rerun()
+
     elif result.get("session_complete"):
+        st.markdown(f'<div class="step-label">{label}</div>', unsafe_allow_html=True)
+        fake_stream(ai_msg)
         st.session_state.chat_history.append(("therapist", ai_msg, label))
         st.session_state.session_ended = True
         st.session_state.end_reason = "complete"
+        time.sleep(1)
+        st.rerun()
+
     else:
+        st.markdown(f'<div class="step-label">{label}</div>', unsafe_allow_html=True)
+        fake_stream(ai_msg)
         st.session_state.chat_history.append(("therapist", ai_msg, label))
 
+    st.stop()
+
+# Chat input
+user_input = st.chat_input("Type your response...")
+
+if user_input:
+    # Phase 1: Show patient message immediately
+    st.session_state.chat_history.append(("patient", user_input, ""))
+    st.session_state.pending_input = user_input
     st.rerun()
 
 # Sidebar
