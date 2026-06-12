@@ -96,15 +96,6 @@ SKILLS = _load_all_skills()
 # ═══════════════════════════════════════════════════════════════════
 
 def _parse_extract_spec(step_name):
-    """Parse ## Data to Extract into structured spec.
-    
-    Supported lines:
-      field: name | type: string/list/boolean/enum | description: ...
-      observation: obs_type
-      None
-    
-    Field names should match WETState keys directly — no mapping needed.
-    """
     raw = SKILLS[step_name].get("data_to_extract", "")
     if not raw or raw.strip().lower() == "none":
         return {"fields": [], "observation": None}
@@ -139,9 +130,6 @@ def _parse_extract_spec(step_name):
                     field["values"] = [x.strip() for x in v.split(",")]
             if field["name"]:
                 fields.append(field)
-        else:
-            print(f"  ⚠️  [{step_name}] Unrecognized line in Data to Extract: '{line}'")
-            print(f"       Must start with 'field:', 'observation:', or 'None'")
 
     return {"fields": fields, "observation": observation}
 
@@ -160,7 +148,6 @@ def _build_json_schema(spec):
         else:
             null = ", or null" if f["nullable"] else ""
             parts.append(f'"{f["name"]}": "{f["description"]}{null}"')
-    # Always ask LLM to generate a clinical observation summary
     if spec["observation"]:
         parts.append(
             '"observation_summary": "1-2 sentence clinical observation '
@@ -168,7 +155,6 @@ def _build_json_schema(spec):
             'clinically relevant details. Write as a therapist note, '
             'not a transcript."')
     return "{\n  " + ",\n  ".join(parts) + "\n}"
-
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -197,9 +183,9 @@ class WETState(TypedDict):
     session_summaries: list[dict]
     clinical_observations: list[dict]
     avoidance_patterns: list[dict]
-    safety_answers: dict          # screening Q&A results
-    safety_risk: str              # LOW / MODERATE / HIGH
-    safety_return_step: str       # which therapy step to return to after LOW risk
+    safety_answers: dict
+    safety_risk: str
+    safety_return_step: str
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -216,7 +202,6 @@ def _safe_json(text, default):
     try:
         return json.loads(text.replace("```json","").replace("```","").strip())
     except (json.JSONDecodeError, AttributeError):
-        print("JSONDecodeError")
         return default
 
 SYSTEM_PROMPT = """You are a compassionate, clinically trained Written
@@ -274,6 +259,12 @@ def _add_obs(state, obs_type, content):
     }]
 
 
+def _ai_msg(content, step_label=""):
+    """Create AIMessage with step label in metadata for chat history."""
+    return AIMessage(content=content,
+                     additional_kwargs={"step_label": step_label})
+
+
 # ═══════════════════════════════════════════════════════════════════
 # Suicide Risk Assessment — Subgraph
 # ═══════════════════════════════════════════════════════════════════
@@ -292,7 +283,6 @@ SCREENING_MAP = dict(SCREENING_QUESTIONS)
 
 
 def _classify_risk(answers: dict) -> str:
-    """Classify risk level from screening answers."""
     if answers.get("q5", False):
         return "HIGH"
     if answers.get("q6", False) and answers.get("q6_recency") in ("within_3_months", "unclear"):
@@ -302,10 +292,7 @@ def _classify_risk(answers: dict) -> str:
     return "LOW"
 
 
-# ── Safety screening node: detect trigger in judge ──
-
 def _safety_screen(state):
-    """Check if the patient's last message triggers safety screening."""
     last_msg = _get_last_human(state)
     if not last_msg:
         return {"current_step": state.get("current_step", "")}
@@ -333,23 +320,17 @@ def _safety_screen(state):
     return {"current_step": state.get("current_step", "")}
 
 
-# ── Safety question nodes (prompt + judge for each Q) ──
-
 def _make_safety_prompt(q_key):
-    """Create prompt node for a screening question."""
     def fn(state):
         if state.get("current_step") != q_key:
             question = SCREENING_MAP[q_key]
             return {"current_step": q_key,
-                    "messages": [AIMessage(content=question)]}
+                    "messages": [_ai_msg(question, f"Safety — {q_key.upper()}")]}
         return {"current_step": q_key, "messages": []}
     return fn
 
 
 def _make_safety_judge(q_key):
-    """Create judge node for a screening question.
-    LLM interprets patient's free-form answer as yes/no/unclear.
-    If unclear, generates a follow-up and loops back."""
     def fn(state):
         last_msg = _get_last_human(state)
         question = SCREENING_MAP[q_key]
@@ -381,7 +362,7 @@ def _make_safety_judge(q_key):
                     "me with roughly when that was — was it recently, "
                     "in the past few months, or longer ago than that?")
                 return {"current_step": q_key,
-                        "messages": [AIMessage(content=fu)]}
+                        "messages": [_ai_msg(fu, f"Safety — {q_key.upper()}")]}
 
             answers["q6_recency"] = recency
             risk = _classify_risk(answers)
@@ -417,7 +398,7 @@ def _make_safety_judge(q_key):
                     "understand, could you tell me a bit more about "
                     "what you mean?")
                 return {"current_step": q_key,
-                        "messages": [AIMessage(content=fu)]}
+                        "messages": [_ai_msg(fu, f"Safety — {q_key.upper()}")]}
 
             is_yes = answer == "yes"
             answers[q_key] = is_yes
@@ -429,11 +410,9 @@ def _make_safety_judge(q_key):
 
 
 def _safety_result_node(state):
-    """Final node — generate response based on risk level."""
     risk = state.get("safety_risk", "LOW")
     answers = state.get("safety_answers", {})
 
-    # Log to DB
     if _db is not None:
         pid = state.get("patient_id", "")
         session_num = state.get("current_session", 0)
@@ -451,7 +430,7 @@ def _safety_result_node(state):
         return_step = state.get("safety_return_step", "step1")
         return {
             "current_step": return_step,
-            "messages": [AIMessage(content=msg)],
+            "messages": [_ai_msg(msg, "Safety — LOW risk")],
             "safety_answers": {},
             "safety_risk": "",
         }
@@ -468,7 +447,7 @@ def _safety_result_node(state):
         return {
             "current_step": "safety_stop",
             "session_complete": True,
-            "messages": [AIMessage(content=msg)],
+            "messages": [_ai_msg(msg, f"⚠️ Safety — {risk} risk")],
         }
 
 
@@ -476,7 +455,7 @@ def _safety_result_node(state):
 
 def _safety_q1_router(state):
     if state.get("current_step") == "q1":
-        return "safety_q1_prompt"  # unclear → loop back
+        return "safety_q1_prompt"
     return "safety_q2_prompt"
 
 def _safety_q2_router(state):
@@ -515,6 +494,27 @@ def _safety_q6_recency_router(state):
 
 
 # ═══════════════════════════════════════════════════════════════════
+# Step Labels (used by make_prompt/make_judge for message metadata)
+# ═══════════════════════════════════════════════════════════════════
+
+STEP_LABELS = {
+    "step1":  "Step 1/13  — Greetings",
+    "step2":  "Step 2/13  — Reason for therapy",
+    "step3":  "Step 3/13  — Current feelings",
+    "step4":  "Step 4/13  — Psychoed: threat/fear/arousal",
+    "step5":  "Step 5/13  — Psychoed: trauma concept",
+    "step6":  "Step 6/13  — Psychoed: avoidance",
+    "step7":  "Step 7/13  — Additional symptoms",
+    "step8":  "Step 8/13  — Introduce WET",
+    "step9":  "Step 9/13  — Identify trauma",
+    "step10": "Step 10/13 — PTSD impact & goals",
+    "step11": "Step 11/13 — WET details & Q&A",
+    "step12": "Step 12/13 — Trauma bookends",
+    "step13": "Step 13/13 — Closing",
+}
+
+
+# ═══════════════════════════════════════════════════════════════════
 # Unified make_prompt / make_judge
 # ═══════════════════════════════════════════════════════════════════
 
@@ -526,9 +526,17 @@ def make_prompt(step_name):
             notes = skill.get("clinical_notes", "")
             if notes:
                 task += f"\n\nCLINICAL NOTES:\n{notes}"
+            task += ("\n\nCROSS-STEP AWARENESS: Review the full conversation "
+                     "history. If the patient has already shared information "
+                     "relevant to this step in earlier steps, reference what "
+                     "they said instead of asking the same question again. "
+                     "For example, if they already described body reactions, "
+                     "say 'You mentioned your hands get sweaty...' instead of "
+                     "'Do you notice any body reactions?'")
             content = _llm(state, task)
+            label = STEP_LABELS.get(step_name, step_name)
             return {"current_step": step_name, "awaiting_input": True,
-                    "messages": [AIMessage(content=content)]}
+                    "messages": [_ai_msg(content, label)]}
         return {"current_step": step_name, "messages": []}
     return prompt_fn
 
@@ -556,7 +564,19 @@ def make_judge(step_name):
 
         task = (f"[TASK] Evaluate patient response for {step_name}.\n\n"
                 f"Review ALL messages in this step.\n\n"
-                f"CRITERIA:\n{criteria}\n\n")
+                f"CRITERIA:\n{criteria}\n\n"
+                "ANTI-LOOPING RULE: If the core criteria are already met "
+                "(patient shared what was needed AND therapist acknowledged "
+                "at least once), set pass=true EVEN IF the patient shared "
+                "additional details in their latest message. New details "
+                "will be addressed in later steps. Do NOT keep looping "
+                "just because the patient volunteered extra information.\n\n"
+                "CROSS-STEP AWARENESS: Review the FULL conversation "
+                "history, not just messages from this step. If the patient "
+                "already shared relevant information in an earlier step "
+                "(e.g. described body reactions in Step 2 that are asked "
+                "about in Step 4), count that as meeting the criteria. "
+                "Do NOT re-ask for information already provided.\n\n")
         if follow_guidance:
             task += (
                 f"FOLLOW-UP GUIDANCE (if pass=false):\n{follow_guidance}\n\n"
@@ -581,28 +601,24 @@ def make_judge(step_name):
         if not result.get("pass", True):
             fu = _get_follow_up(state, result,
                 f"[TASK] Respond for {step_name}. Guide. 2-3 sentences.")
+            label = STEP_LABELS.get(step_name, step_name)
             return {"current_step": step_name,
-                    "messages": [AIMessage(content=fu)]}
+                    "messages": [_ai_msg(fu, label)]}
 
         # ── PASS: write extracted fields directly to state ──
         updates = {"current_step": f"{step_name}_done", "messages": []}
 
-        # Field names = state keys. Write directly.
         for f in spec["fields"]:
             val = result.get(f["name"])
             if val is not None:
                 updates[f["name"]] = val
 
-        # Derived fields (hardcoded — too complex for DSL)
-        # step2: trauma_described = category is describes_trauma AND index_trauma exists
         if result.get("category") == "describes_trauma" and result.get("index_trauma"):
             updates["trauma_described"] = True
 
-        # step9: if index_trauma was extracted, trauma_described = True
         if step_name == "step9" and result.get("index_trauma"):
             updates["trauma_described"] = True
 
-        # step12: compose trauma_bookends from individual fields
         if result.get("beginning") and result.get("end"):
             updates["trauma_bookends"] = {
                 "beginning": result.get("beginning", ""),
@@ -610,8 +626,6 @@ def make_judge(step_name):
                 "duration": result.get("duration", ""),
             }
 
-        # step6: convert avoidance_patterns list[str] → list[dict] with metadata
-        # (overrides the generic list[str] written above)
         if result.get("avoidance_patterns") and isinstance(result["avoidance_patterns"], list):
             entries = [
                 {"session": state.get("current_session", 0),
@@ -622,7 +636,6 @@ def make_judge(step_name):
             updates["avoidance_patterns"] = \
                 state.get("avoidance_patterns", []) + entries
 
-        # Store observation (LLM-generated summary, not raw patient text)
         if spec["observation"]:
             obs = result.get("observation_summary", "")
             if not obs:
@@ -630,7 +643,6 @@ def make_judge(step_name):
             updates["clinical_observations"] = _add_obs(
                 state, spec["observation"], obs)
 
-        # ── Real-time DB write ──
         if _db is not None:
             pid = state.get("patient_id", "")
             session_num = state.get("current_session", 0)
@@ -642,7 +654,6 @@ def make_judge(step_name):
             if db_updates:
                 _db.update_patient(pid, **db_updates)
 
-            # Write avoidance patterns to DB
             if result.get("avoidance_patterns") and isinstance(result["avoidance_patterns"], list):
                 for p in result["avoidance_patterns"]:
                     _db.add_avoidance_pattern(pid, session_num, p)
@@ -654,9 +665,6 @@ def make_judge(step_name):
 
         return updates
     return judge_fn
-
-
-# Step 9 no longer needs custom code — skip logic is in step8_judge router
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -671,7 +679,6 @@ def step13_closing(state):
         task += f"\n\nCLINICAL NOTES:\n{notes}"
     content = _llm(state, task)
 
-    # Generate session summary for cross-session memory
     summary = _llm_json(state, (
         "[TASK] Generate a clinical session summary for Session 0.\n\n"
         "This summary will be injected into future sessions' system "
@@ -711,7 +718,7 @@ def step13_closing(state):
     updates = {
         "current_step": "step13_done",
         "session_complete": True,
-        "messages": [AIMessage(content=content)],
+        "messages": [_ai_msg(content, STEP_LABELS.get("step13", "Closing"))],
         "session_summaries": state.get("session_summaries", []) + [session_summary],
         "clinical_observations": _add_obs(
             state, "session_complete", completion_note),
@@ -758,7 +765,6 @@ STEP_DEFS = [
     ("step12", make_prompt("step12"), make_judge("step12")),
 ]
 
-# Safety screening question keys (for building subgraph)
 SAFETY_QS = ["q1", "q2", "q3", "q4", "q5", "q6", "q6_recency"]
 
 SAFETY_ROUTERS = {
@@ -775,19 +781,16 @@ SAFETY_ROUTERS = {
 def build_session0():
     g = StateGraph(WETState)
 
-    # ── Main therapy nodes ──
     for name, pfn, jfn in STEP_DEFS:
         g.add_node(f"{name}_prompt", pfn)
         g.add_node(f"{name}_judge", jfn)
     g.add_node("step13_closing", step13_closing)
 
-    # ── Safety subgraph nodes ──
     for qk in SAFETY_QS:
         g.add_node(f"safety_{qk}_prompt", _make_safety_prompt(qk))
         g.add_node(f"safety_{qk}_judge", _make_safety_judge(qk))
     g.add_node("safety_result", _safety_result_node)
 
-    # ── Main therapy edges ──
     g.add_edge(START, "step1_prompt")
 
     for i, (name, _, _) in enumerate(STEP_DEFS):
@@ -822,14 +825,8 @@ def build_session0():
 
     g.add_edge("step13_closing", END)
 
-    # ── Safety subgraph edges ──
     for qk in SAFETY_QS:
         g.add_edge(f"safety_{qk}_prompt", f"safety_{qk}_judge")
-
-    # Safety routing: each judge → router → next question or result
-    # Build destination sets for each router
-    safety_dests = {f"safety_{qk}_prompt" for qk in SAFETY_QS}
-    safety_dests.add("safety_result")
 
     for qk in SAFETY_QS:
         router = SAFETY_ROUTERS[qk]
@@ -853,15 +850,12 @@ def build_session0():
             f"safety_{qk}_judge", router,
             {d: d for d in possible})
 
-    # Safety result → conditional: LOW returns to therapy, MOD/HIGH → END
-    # Build all possible return destinations
     all_therapy_prompts = {f"{s[0]}_prompt": f"{s[0]}_prompt" for s in STEP_DEFS}
     all_therapy_prompts["safety_stop"] = END
 
     def _safety_result_router(state):
         if state.get("current_step") == "safety_stop":
             return "safety_stop"
-        # LOW risk: return to the therapy step prompt
         return_step = state.get("safety_return_step", "step1")
         return f"{return_step}_prompt"
 
@@ -888,11 +882,10 @@ def create_app():
     checkpointer = SqliteSaver(conn)
 
     db = PatientDB(str(DB_DIR / "patients.db"))
-    _db = db   # make accessible to make_judge
+    _db = db
 
     graph = build_session0()
 
-    # interrupt_after: all therapy prompts + all safety prompts
     interrupt_nodes = [f"{s[0]}_prompt" for s in STEP_DEFS]
     interrupt_nodes += [f"safety_{qk}_prompt" for qk in SAFETY_QS]
 
@@ -902,20 +895,14 @@ def create_app():
     return app, db
 
 def start_session(app, db, pid):
-    """Start a new session. Creates patient in DB if not exists.
-    If patient already has a partially completed session, resumes it."""
     config = {"configurable": {"thread_id": f"patient_{pid}_s0"}}
 
-    # Check if we can resume an existing session
     existing = app.get_state(config)
     if existing and existing.values and existing.values.get("current_step"):
         if existing.values.get("session_complete"):
-            print(f"  Session 0 already complete for {pid}.")
             return existing.values
-        print(f"  Resuming session for {pid} at {existing.values['current_step']}")
         return existing.values
 
-    # New session — create patient in DB
     db.create_patient(pid)
 
     return app.invoke({
@@ -951,22 +938,6 @@ def get_ai_msg(result):
 # CLI
 # ═══════════════════════════════════════════════════════════════════
 
-STEP_LABELS = {
-    "step1":  "Step 1/13  — Greetings",
-    "step2":  "Step 2/13  — Reason for therapy",
-    "step3":  "Step 3/13  — Current feelings",
-    "step4":  "Step 4/13  — Psychoed: threat/fear/arousal",
-    "step5":  "Step 5/13  — Psychoed: trauma concept",
-    "step6":  "Step 6/13  — Psychoed: avoidance",
-    "step7":  "Step 7/13  — Additional symptoms",
-    "step8":  "Step 8/13  — Introduce WET",
-    "step9":  "Step 9/13  — Identify trauma",
-    "step10": "Step 10/13 — PTSD impact & goals",
-    "step11": "Step 11/13 — WET details & Q&A",
-    "step12": "Step 12/13 — Trauma bookends",
-    "step13": "Step 13/13 — Closing",
-}
-
 def _print_step(result):
     step = result.get("current_step", "")
     base = step.replace("_done", "")
@@ -975,7 +946,6 @@ def _print_step(result):
 
 
 def _print_state(result):
-    """Print extracted state after every turn."""
     print("  ┌─── State ───────────────────────────────────")
     print(f"  │ step:             {result.get('current_step', '')}")
     print(f"  │ reason_for_therapy: {result.get('reason_for_therapy', '') or '—'}")
@@ -983,24 +953,18 @@ def _print_state(result):
     print(f"  │ index_trauma:      {result.get('index_trauma', '') or '—'}")
     print(f"  │ therapy_goals:     {result.get('therapy_goals', []) or '—'}")
     print(f"  │ trauma_bookends:   {result.get('trauma_bookends', {}) or '—'}")
-
-    # Avoidance patterns
     av = result.get("avoidance_patterns", [])
     if av:
         patterns = [a.get("pattern", "") for a in av]
         print(f"  │ avoidance_patterns: {patterns}")
     else:
         print(f"  │ avoidance_patterns: —")
-
-    # Session summaries
     ss = result.get("session_summaries", [])
     if ss:
         latest = ss[-1]
         print(f"  │ session_summaries: {len(ss)} (latest: {latest.get('summary','')[:80]}...)")
     else:
         print(f"  │ session_summaries: —")
-
-    # Observations
     obs = result.get("clinical_observations", [])
     print(f"  │ observations:      {len(obs)}", end="")
     if obs:
@@ -1008,7 +972,6 @@ def _print_state(result):
         print(f" (latest: [{latest.get('type','')}] {latest.get('content','')[:60]})")
     else:
         print()
-
     print(f"  │ messages:          {len(result.get('messages', []))}")
     print(f"  │ session_complete:  {result.get('session_complete', False)}")
     print("  └────────────────────────────────────────────")
@@ -1022,14 +985,12 @@ if __name__ == "__main__":
 
     app, db = create_app()
 
-    # Ask for patient ID
     pid = input("  Enter Patient ID: ").strip()
     if not pid:
         pid = "P001"
         print(f"  Using default: {pid}")
     print()
 
-    # Admin mode — management only, no session
     if pid == "admin":
         print("  Admin mode. Commands: reset, reset patient, db, quit\n")
         while True:
@@ -1078,12 +1039,18 @@ if __name__ == "__main__":
         import sys
         sys.exit(0)
 
-    # Normal patient mode
     print("'quit' to exit, 'state' to inspect, 'db' to view DB.\n")
 
     result = start_session(app, db, pid)
+
+    if result.get("session_complete"):
+        print("  Session already complete. Use 'admin' mode to reset.")
+        db.print_patient_summary(pid)
+        db.close()
+        import sys
+        sys.exit(0)
+
     _print_step(result)
-    # _print_state(result)
     print(f"\nTHERAPIST:\n{get_ai_msg(result)}\n")
 
     while True:
@@ -1113,7 +1080,6 @@ if __name__ == "__main__":
         print()
         result = run_turn(app, pid, inp)
         _print_step(result)
-        # _print_state(result)
         print(f"\nTHERAPIST:\n{get_ai_msg(result)}\n")
 
         if result.get("current_step") == "safety_stop":
