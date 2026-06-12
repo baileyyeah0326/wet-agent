@@ -11,7 +11,7 @@ Transition from step 4.
    - Traumatic memories are stored DIFFERENTLY — fragmented, not filed away like normal memories
    - This is why flashbacks, nightmares, and sudden intense reactions happen
    - This is NOT a sign of weakness — it is the brain's way of trying to process something overwhelming
-3. Ask how this connects to their experience
+3. Ask whether it makes sense to the patient.
 
 ## Judge Criteria
 pass=true when ALL are met:

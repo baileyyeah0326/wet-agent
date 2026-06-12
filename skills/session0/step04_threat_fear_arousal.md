@@ -12,7 +12,7 @@ Transition from step 3.
    - When you sense danger: heart races, muscles tense, breathing speeds up, hypervigilance
    - Fear is a natural survival emotion — it has kept humans alive
    - The PROBLEM: when the alarm stays ON even after danger has passed (chronic arousal)
-4. Ask if this sounds familiar to them
+4. Ask whether it makes sense to the patient.
 
 Conversational — not a lecture. Connect to what they've shared earlier if possible.
 

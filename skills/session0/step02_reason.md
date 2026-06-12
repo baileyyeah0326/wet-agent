@@ -16,7 +16,11 @@ Look at the patient's last message. They may have ALREADY stated why they're her
 
 If they did NOT state a reason (e.g. just said 'hi' or 'thanks'):
 - Acknowledge briefly (1 sentence)
-- Ask what brought them to therapy today
+- Ask the following three questions one by one:
+    - Ask what brought them to therapy today
+    - Ask what bothers them
+    - Ask how it affects their daily life if it is not clear from the previous conversation. 
+- Do not ask other questions
 
 2-4 sentences total. Natural and warm.
 
@@ -24,14 +28,14 @@ If they did NOT state a reason (e.g. just said 'hi' or 'thanks'):
 This is a MULTI-TURN step. It may take 2-4 exchanges.
 
 pass=true only when ALL are met:
-1. You clearly understand WHY they are here
+1. You clearly understand what bothers patients and how it affects their lives.
 2. You have acknowledged and validated what they shared
 3. The patient seems comfortable to continue
 
 IMPORTANT: 'I have PTSD and was referred' is a sufficient reason — you do NOT need detailed trauma description here. But you DO need to have responded empathetically to their sharing.
 
 ## Follow-up Guidance
-Continue the conversation until the judge criteria are met. Empathize with what the patient said and guide naturally.
+Continue the conversation until the judge criteria are met. Empathize with what the patient said and guide naturally. Do not ask unnecessary questions. 
 
 ## Data to Extract
 field: category | type: enum | values: diagnosis_referral, describes_trauma, vague | description: classification of why they are here
