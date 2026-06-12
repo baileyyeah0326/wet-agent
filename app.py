@@ -122,7 +122,26 @@ if st.session_state.admin_mode:
                 st.success(f"✅ Patient '{pid_clean}' deleted.")
             except Exception as e:
                 st.error(f"Error: {e}")
+    st.markdown("---")
 
+    # ── Reset All Data ──
+    st.subheader("⚠️ Reset All Data")
+    st.warning("This will delete ALL patients and ALL session data permanently.")
+    confirm = st.text_input("Type 'DELETE ALL' to confirm:", key="admin_reset_all")
+    if st.button("🗑️ Delete Everything"):
+        if confirm == "DELETE ALL":
+            try:
+                cur = st.session_state.db.conn.cursor()
+                for table in ["avoidance_patterns", "clinical_observations",
+                              "session_data", "patients"]:
+                    cur.execute(f"DELETE FROM {table}")
+                if DB_BACKEND != "postgres":
+                    st.session_state.db.conn.commit()
+                st.success("✅ All data deleted.")
+            except Exception as e:
+                st.error(f"Error: {e}")
+        else:
+            st.error("Please type 'DELETE ALL' to confirm.")
     st.stop()
 
 
