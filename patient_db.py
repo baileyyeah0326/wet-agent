@@ -2,8 +2,8 @@
 Patient Database — supports PostgreSQL (cloud) and SQLite (local).
 
 Automatically selects backend:
-  - DATABASE_URL set → PostgreSQL (Supabase/cloud, data persists forever)
-  - Otherwise → SQLite (local file, data persists on disk)
+  - DATABASE_URL set → PostgreSQL (data persists forever)
+  - Otherwise → SQLite (local file)
 """
 
 import json
@@ -34,14 +34,27 @@ class PatientDB:
     def __init__(self, db_path: str = "wet_patients.db"):
         self.db_path = db_path
         if DB_BACKEND == "postgres":
-            self.conn = psycopg2.connect(DATABASE_URL)
-            self.conn.autocommit = True
+            self._connect_postgres()
             self._p = "%s"
         else:
             self.conn = sqlite3.connect(db_path, check_same_thread=False)
             self.conn.row_factory = sqlite3.Row
             self._p = "?"
         self._init_tables()
+
+    def _connect_postgres(self):
+        self.conn = psycopg2.connect(DATABASE_URL)
+        self.conn.autocommit = True
+
+    def _ensure_conn(self):
+        if DB_BACKEND != "postgres":
+            return
+        try:
+            cur = self.conn.cursor()
+            cur.execute("SELECT 1")
+            cur.fetchone()
+        except Exception:
+            self._connect_postgres()
 
     def _q(self, sql):
         if DB_BACKEND == "postgres":
@@ -69,6 +82,7 @@ class PatientDB:
             return [dict(row) for row in cur.fetchall()]
 
     def _init_tables(self):
+        self._ensure_conn()
         cur = self.conn.cursor()
         if DB_BACKEND == "postgres":
             cur.execute("""
@@ -145,6 +159,7 @@ class PatientDB:
             self.conn.commit()
 
     def create_patient(self, patient_id):
+        self._ensure_conn()
         now = datetime.now().isoformat()
         try:
             cur = self.conn.cursor()
@@ -158,6 +173,7 @@ class PatientDB:
         return self.get_patient(patient_id)
 
     def get_patient(self, patient_id):
+        self._ensure_conn()
         cur = self.conn.cursor()
         cur.execute(self._q("SELECT * FROM patients WHERE patient_id = ?"), (patient_id,))
         p = self._fetchone(cur)
@@ -170,6 +186,7 @@ class PatientDB:
         return p
 
     def update_patient(self, patient_id, **kwargs):
+        self._ensure_conn()
         allowed = {"index_trauma", "trauma_described", "trauma_bookends",
                     "therapy_goals", "reason_for_therapy", "modality",
                     "current_session", "treatment_complete"}
@@ -197,6 +214,7 @@ class PatientDB:
     def save_session(self, patient_id, session_num, pcl5_score=None,
                      phq9_score=None, suds_pre=None, suds_post=None,
                      narrative=None, narrative_feedback=None, session_summary=""):
+        self._ensure_conn()
         cur = self.conn.cursor()
         cur.execute(self._q("""
             INSERT INTO session_data
@@ -211,6 +229,7 @@ class PatientDB:
             self.conn.commit()
 
     def get_sessions(self, patient_id):
+        self._ensure_conn()
         cur = self.conn.cursor()
         cur.execute(self._q("SELECT * FROM session_data WHERE patient_id = ? ORDER BY session_num"),
             (patient_id,))
@@ -229,6 +248,7 @@ class PatientDB:
         }
 
     def add_observation(self, patient_id, session_num, obs_type, content):
+        self._ensure_conn()
         cur = self.conn.cursor()
         cur.execute(self._q("""
             INSERT INTO clinical_observations
@@ -239,6 +259,7 @@ class PatientDB:
             self.conn.commit()
 
     def get_observations(self, patient_id, session_num=None):
+        self._ensure_conn()
         cur = self.conn.cursor()
         if session_num is not None:
             cur.execute(self._q(
@@ -251,6 +272,7 @@ class PatientDB:
         return self._fetchall(cur)
 
     def add_avoidance_pattern(self, patient_id, session_num, pattern):
+        self._ensure_conn()
         cur = self.conn.cursor()
         cur.execute(self._q("""
             INSERT INTO avoidance_patterns
@@ -261,12 +283,14 @@ class PatientDB:
             self.conn.commit()
 
     def get_avoidance_patterns(self, patient_id):
+        self._ensure_conn()
         cur = self.conn.cursor()
         cur.execute(self._q("SELECT * FROM avoidance_patterns WHERE patient_id = ? ORDER BY id"),
             (patient_id,))
         return self._fetchall(cur)
 
     def get_session_summaries(self, patient_id):
+        self._ensure_conn()
         cur = self.conn.cursor()
         cur.execute(self._q(
             "SELECT session_num, session_summary FROM session_data "
