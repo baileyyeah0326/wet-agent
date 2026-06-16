@@ -306,7 +306,7 @@ if st.session_state.pending_input:
         fake_stream(ai_msg)
         st.session_state.chat_history.append(("therapist", ai_msg, label))
 
-    st.stop()
+    st.rerun()
 
 # Chat input
 user_input = st.chat_input("Type your response...")
