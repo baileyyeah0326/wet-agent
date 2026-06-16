@@ -32,6 +32,7 @@ st.markdown("""
         padding: 12px 16px; border-radius: 0 8px 8px 0; margin: 8px 0;
     }
     .step-label { font-size: 0.85em; color: #888; margin-bottom: 4px; }
+    .stTextInput div[data-testid="InputInstructions"] { display: none; }
 </style>
 """, unsafe_allow_html=True)
 
