@@ -275,15 +275,10 @@ if st.session_state.page == "progress":
                     st.markdown(f"**PHQ-9:** {phq9_scores}")
 
     session_name = SESSION_NAMES.get(current_session, f"Session {current_session}")
-    if current_session >= 1:
-        st.info("Before starting, you'll complete two brief questionnaires (PCL-5 & PHQ-9).")
 
     if st.button(f"▶ Start {session_name}", use_container_width=True):
         st.session_state.current_session_num = current_session
-        if current_session >= 1:
-            st.session_state.page = "questionnaire"
-        else:
-            st.session_state.page = "session"
+        st.session_state.page = "session"
         st.rerun()
 
     st.markdown("---")
@@ -302,10 +297,11 @@ if st.session_state.page == "questionnaire":
 
     # Already submitted — show scores and continue button
     if st.session_state.questionnaire_scores:
+        st.markdown("### Step 2/11 — Questionnaires Complete")
         st.success("✅ Questionnaires submitted!")
         display_scores_summary(st.session_state.questionnaire_scores)
 
-        if st.button("▶ Continue to Session", use_container_width=True):
+        if st.button("▶ Continue to Step 3", use_container_width=True):
             st.session_state.page = "session"
             st.rerun()
 
@@ -435,6 +431,18 @@ if st.session_state.page == "session":
             st.rerun()
 
         else:
+            # Check if Step 1 just passed → redirect to questionnaire (Step 2)
+            current_step = result.get("current_step", "")
+            if (session_num >= 1
+                    and current_step.startswith("s1_step3")
+                    and not st.session_state.questionnaire_scores):
+                st.markdown(f'<div class="step-label">{label}</div>', unsafe_allow_html=True)
+                fake_stream(ai_msg)
+                st.session_state.chat_history.append(("therapist", ai_msg, label))
+                st.session_state.page = "questionnaire"
+                time.sleep(1)
+                st.rerun()
+
             st.markdown(f'<div class="step-label">{label}</div>', unsafe_allow_html=True)
             fake_stream(ai_msg)
             st.session_state.chat_history.append(("therapist", ai_msg, label))
