@@ -1,13 +1,9 @@
 """
 WET Agent — Streamlit Web UI (Multi-Session)
-
-Supports Session 0-5 with automatic progress tracking.
-Sessions 1-5 include PCL-5/PHQ-9 questionnaires.
 """
 
 import streamlit as st
 import time
-import json
 
 st.set_page_config(
     page_title="WET Therapy",
@@ -35,10 +31,6 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-
-# ═══════════════════════════════════════════════════════
-# Imports — session modules
-# ═══════════════════════════════════════════════════════
 from session0 import (
     create_app as create_app_s0,
     start_session as start_session_s0,
@@ -56,7 +48,6 @@ from session1 import (
 from questionnaires import render_questionnaires, display_scores_summary
 from patient_db import DB_BACKEND
 
-
 # ═══════════════════════════════════════════════════════
 # Session state init
 # ═══════════════════════════════════════════════════════
@@ -67,13 +58,23 @@ if "initialized" not in st.session_state:
     st.session_state.app_s1 = app_s1
     st.session_state.db = db
     st.session_state.pid = None
-    st.session_state.page = "login"  # login | admin | progress | questionnaire | session | ended
+    st.session_state.page = "login"
     st.session_state.current_session_num = 0
     st.session_state.chat_history = []
     st.session_state.end_reason = None
     st.session_state.pending_input = None
     st.session_state.questionnaire_scores = None
     st.session_state.initialized = True
+
+
+SESSION_NAMES = {
+    0: "Session 0 — Pre-treatment",
+    1: "Session 1 — First Writing",
+    2: "Session 2 — Writing",
+    3: "Session 3 — Writing",
+    4: "Session 4 — Writing",
+    5: "Session 5 — Final Writing",
+}
 
 
 def reset_to_login():
@@ -134,15 +135,6 @@ def rebuild_chat(result, session_num):
         elif isinstance(msg, HumanMessage):
             st.session_state.chat_history.append(("patient", msg.content, ""))
 
-
-SESSION_NAMES = {
-    0: "Session 0 — Pre-treatment",
-    1: "Session 1 — First Writing",
-    2: "Session 2 — Writing",
-    3: "Session 3 — Writing",
-    4: "Session 4 — Writing",
-    5: "Session 5 — Final Writing",
-}
 
 # ═══════════════════════════════════════════════════════
 # PAGE: Admin Panel
@@ -251,9 +243,7 @@ if st.session_state.page == "progress":
     st.markdown(f"**Patient:** {pid}")
     st.markdown("---")
 
-    # Display session progress
     st.subheader("📊 Treatment Progress")
-
     for i in range(6):
         name = SESSION_NAMES.get(i, f"Session {i}")
         if i < current_session:
@@ -273,7 +263,6 @@ if st.session_state.page == "progress":
 
     st.markdown("---")
 
-    # Show score trajectory if available
     sessions = st.session_state.db.get_sessions(pid)
     if sessions:
         pcl5_scores = [s["pcl5_score"] for s in sessions if s.get("pcl5_score") is not None]
@@ -285,9 +274,7 @@ if st.session_state.page == "progress":
                 if phq9_scores:
                     st.markdown(f"**PHQ-9:** {phq9_scores}")
 
-    # Start session button
     session_name = SESSION_NAMES.get(current_session, f"Session {current_session}")
-
     if current_session >= 1:
         st.info("Before starting, you'll complete two brief questionnaires (PCL-5 & PHQ-9).")
 
@@ -312,10 +299,22 @@ if st.session_state.page == "progress":
 # ═══════════════════════════════════════════════════════
 if st.session_state.page == "questionnaire":
     session_num = st.session_state.current_session_num
+
+    # Already submitted — show scores and continue button
+    if st.session_state.questionnaire_scores:
+        st.success("✅ Questionnaires submitted!")
+        display_scores_summary(st.session_state.questionnaire_scores)
+
+        if st.button("▶ Continue to Session", use_container_width=True):
+            st.session_state.page = "session"
+            st.rerun()
+
+        st.stop()
+
+    # Not yet submitted — show questionnaire form
     scores = render_questionnaires(session_num)
 
     if scores:
-        # Save scores to DB
         pid = st.session_state.pid
         try:
             st.session_state.db.save_session(
@@ -323,17 +322,10 @@ if st.session_state.page == "questionnaire":
                 pcl5_score=scores["pcl5_total"],
                 phq9_score=scores["phq9_total"])
         except Exception:
-            pass  # Session data may be saved later in closing
+            pass
 
         st.session_state.questionnaire_scores = scores
-        st.success("✅ Questionnaires submitted!")
-        display_scores_summary(scores)
-
-        if st.button("▶ Continue to Session", use_container_width=True):
-            st.session_state.page = "session"
-            st.rerun()
-
-        st.stop()
+        st.rerun()
 
     st.stop()
 
