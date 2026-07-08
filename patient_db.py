@@ -216,17 +216,46 @@ class PatientDB:
                      narrative=None, narrative_feedback=None, session_summary=""):
         self._ensure_conn()
         cur = self.conn.cursor()
-        cur.execute(self._q("""
-            INSERT INTO session_data
-            (patient_id, session_num, completed_at, pcl5_score, phq9_score,
-             suds_pre, suds_post, narrative, narrative_feedback, session_summary)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """), (patient_id, session_num, datetime.now().isoformat(),
-            pcl5_score, phq9_score, suds_pre, suds_post, narrative,
-            json.dumps(narrative_feedback) if narrative_feedback else "{}",
-            session_summary))
-        if DB_BACKEND != "postgres":
-            self.conn.commit()
+
+        # Check if record already exists
+        cur.execute(self._q(
+            "SELECT id FROM session_data WHERE patient_id = ? AND session_num = ?"),
+            (patient_id, session_num))
+        existing = self._fetchone(cur)
+
+        if existing:
+            # Update only non-None fields
+            updates = {}
+            if pcl5_score is not None: updates["pcl5_score"] = pcl5_score
+            if phq9_score is not None: updates["phq9_score"] = phq9_score
+            if suds_pre is not None: updates["suds_pre"] = suds_pre
+            if suds_post is not None: updates["suds_post"] = suds_post
+            if narrative is not None: updates["narrative"] = narrative
+            if narrative_feedback is not None:
+                updates["narrative_feedback"] = json.dumps(narrative_feedback)
+            if session_summary: updates["session_summary"] = session_summary
+
+            if updates:
+                set_clause = ", ".join(f"{k} = {self._p}" for k in updates)
+                values = list(updates.values()) + [existing["id"]]
+                cur.execute(
+                    f"UPDATE session_data SET {set_clause} WHERE id = {self._p}",
+                    values)
+                if DB_BACKEND != "postgres":
+                    self.conn.commit()
+        else:
+            # Insert new row
+            cur.execute(self._q("""
+                INSERT INTO session_data
+                (patient_id, session_num, completed_at, pcl5_score, phq9_score,
+                 suds_pre, suds_post, narrative, narrative_feedback, session_summary)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """), (patient_id, session_num, datetime.now().isoformat(),
+                pcl5_score, phq9_score, suds_pre, suds_post, narrative,
+                json.dumps(narrative_feedback) if narrative_feedback else "{}",
+                session_summary))
+            if DB_BACKEND != "postgres":
+                self.conn.commit()
 
     def get_sessions(self, patient_id):
         self._ensure_conn()

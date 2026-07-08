@@ -127,6 +127,7 @@ def render_questionnaires(session_num: int) -> dict | None:
                 horizontal=True,
                 key=f"pcl5_q{i+1}_s{session_num}",
                 label_visibility="collapsed",
+                index=None,
             )
             pcl5_responses.append(val)
 
@@ -145,6 +146,7 @@ def render_questionnaires(session_num: int) -> dict | None:
                 horizontal=True,
                 key=f"phq9_q{i+1}_s{session_num}",
                 label_visibility="collapsed",
+                index=None,
             )
             phq9_responses.append(val)
 
@@ -156,6 +158,7 @@ def render_questionnaires(session_num: int) -> dict | None:
             options=PHQ9_DIFFICULTY_OPTIONS,
             key=f"phq9_diff_s{session_num}",
             label_visibility="collapsed",
+            index=None,
         )
 
         # Submit
@@ -166,6 +169,16 @@ def render_questionnaires(session_num: int) -> dict | None:
         )
 
         if submitted:
+            if None in pcl5_responses:
+                st.error("Please answer all PCL-5 questions before submitting.")
+                return None
+            if None in phq9_responses:
+                st.error("Please answer all PHQ-9 questions before submitting.")
+                return None
+            if difficulty is None:
+                st.error("Please answer the difficulty question.")
+                return None
+
             pcl5_total = sum(pcl5_responses)
             phq9_total = sum(phq9_responses)
 
