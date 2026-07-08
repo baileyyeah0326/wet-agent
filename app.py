@@ -136,14 +136,13 @@ def rebuild_chat(result, session_num):
 
 
 SESSION_NAMES = {
-    0: "Session 0 — Assessment",
+    0: "Session 0 — Pre-treatment",
     1: "Session 1 — First Writing",
     2: "Session 2 — Writing",
     3: "Session 3 — Writing",
     4: "Session 4 — Writing",
     5: "Session 5 — Final Writing",
 }
-
 
 # ═══════════════════════════════════════════════════════
 # PAGE: Admin Panel
