@@ -1,17 +1,16 @@
 """
-WET Agent — Session 0 (Streamlit Web UI)
+WET Agent — Streamlit Web UI (Multi-Session)
+
+Supports Session 0-5 with automatic progress tracking.
+Sessions 1-5 include PCL-5/PHQ-9 questionnaires.
 """
 
 import streamlit as st
 import time
-from session0 import (
-    create_app, start_session, run_turn, get_ai_msg,
-    STEP_LABELS,
-)
-from patient_db import DB_BACKEND
+import json
 
 st.set_page_config(
-    page_title="WET Therapy — Session 0",
+    page_title="WET Therapy",
     page_icon="🧠",
     layout="centered",
 )
@@ -36,34 +35,69 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ── Session state init ──
-if "app" not in st.session_state:
-    app, db = create_app()
-    st.session_state.app = app
+
+# ═══════════════════════════════════════════════════════
+# Imports — session modules
+# ═══════════════════════════════════════════════════════
+from session0 import (
+    create_app as create_app_s0,
+    start_session as start_session_s0,
+    run_turn as run_turn_s0,
+    get_ai_msg as get_ai_msg_s0,
+    STEP_LABELS as STEP_LABELS_S0,
+)
+from session1 import (
+    create_app_s1,
+    start_session1,
+    run_turn_s1,
+    get_ai_msg,
+    STEP_LABELS_S1,
+)
+from questionnaires import render_questionnaires, display_scores_summary
+from patient_db import DB_BACKEND
+
+
+# ═══════════════════════════════════════════════════════
+# Session state init
+# ═══════════════════════════════════════════════════════
+if "initialized" not in st.session_state:
+    app_s0, db = create_app_s0()
+    app_s1, _ = create_app_s1()
+    st.session_state.app_s0 = app_s0
+    st.session_state.app_s1 = app_s1
     st.session_state.db = db
     st.session_state.pid = None
-    st.session_state.started = False
+    st.session_state.page = "login"  # login | admin | progress | questionnaire | session | ended
+    st.session_state.current_session_num = 0
     st.session_state.chat_history = []
-    st.session_state.session_ended = False
     st.session_state.end_reason = None
-    st.session_state.admin_mode = False
     st.session_state.pending_input = None
-
-
-def get_step_label(result):
-    step = result.get("current_step", "")
-    base = step.replace("_done", "")
-    return STEP_LABELS.get(base, step)
+    st.session_state.questionnaire_scores = None
+    st.session_state.initialized = True
 
 
 def reset_to_login():
-    st.session_state.started = False
-    st.session_state.chat_history = []
-    st.session_state.session_ended = False
-    st.session_state.end_reason = None
     st.session_state.pid = None
-    st.session_state.admin_mode = False
+    st.session_state.page = "login"
+    st.session_state.chat_history = []
+    st.session_state.end_reason = None
     st.session_state.pending_input = None
+    st.session_state.questionnaire_scores = None
+
+
+def reset_to_progress():
+    st.session_state.page = "progress"
+    st.session_state.chat_history = []
+    st.session_state.end_reason = None
+    st.session_state.pending_input = None
+    st.session_state.questionnaire_scores = None
+
+
+def get_step_label(result, session_num):
+    step = result.get("current_step", "")
+    base = step.replace("_done", "")
+    labels = STEP_LABELS_S1 if session_num >= 1 else STEP_LABELS_S0
+    return labels.get(base, step)
 
 
 def display_chat_history():
@@ -91,31 +125,38 @@ def fake_stream(text, css_class="therapist-msg"):
         unsafe_allow_html=True)
 
 
-def rebuild_chat_from_messages(result):
+def rebuild_chat(result, session_num):
     from langchain_core.messages import AIMessage, HumanMessage
     for msg in result.get("messages", []):
         if isinstance(msg, AIMessage):
             label = msg.additional_kwargs.get("step_label", "")
-            st.session_state.chat_history.append(
-                ("therapist", msg.content, label))
+            st.session_state.chat_history.append(("therapist", msg.content, label))
         elif isinstance(msg, HumanMessage):
-            st.session_state.chat_history.append(
-                ("patient", msg.content, ""))
+            st.session_state.chat_history.append(("patient", msg.content, ""))
 
 
-# ══════════════════════════════════════════════════════
-# Admin Panel
-# ══════════════════════════════════════════════════════
-if st.session_state.admin_mode:
+SESSION_NAMES = {
+    0: "Session 0 — Assessment",
+    1: "Session 1 — First Writing",
+    2: "Session 2 — Writing",
+    3: "Session 3 — Writing",
+    4: "Session 4 — Writing",
+    5: "Session 5 — Final Writing",
+}
+
+
+# ═══════════════════════════════════════════════════════
+# PAGE: Admin Panel
+# ═══════════════════════════════════════════════════════
+if st.session_state.page == "admin":
     st.title("🔧 Admin Panel")
 
     if st.button("← Back to Login"):
-        st.session_state.admin_mode = False
+        reset_to_login()
         st.rerun()
 
     st.markdown("---")
 
-    # View Patient
     st.subheader("📋 View Patient Record")
     view_pid = st.text_input("Patient ID to view:", key="admin_view")
     if st.button("View Record"):
@@ -128,41 +169,31 @@ if st.session_state.admin_mode:
                     st.markdown("**Observations:**")
                     for o in obs:
                         st.markdown(f"- **[{o['obs_type']}]** {o['content'][:300]}")
-                avoidance = st.session_state.db.get_avoidance_patterns(view_pid.strip())
-                if avoidance:
-                    st.markdown("**Avoidance Patterns:**")
-                    for a in avoidance:
-                        st.markdown(f"- {a['pattern']}")
             else:
                 st.warning(f"Patient '{view_pid}' not found.")
 
     st.markdown("---")
 
-    # Reset Patient
     st.subheader("🗑️ Reset Patient")
     reset_pid = st.text_input("Patient ID to reset:", key="admin_reset")
     if st.button("Delete Patient Data"):
         if reset_pid:
-            pid_clean = reset_pid.strip()
             try:
                 cur = st.session_state.db.conn.cursor()
                 for table in ["avoidance_patterns", "clinical_observations",
                               "session_data", "patients"]:
-                    cur.execute(
-                        st.session_state.db._q(
-                            f"DELETE FROM {table} WHERE patient_id = ?"),
-                        (pid_clean,))
+                    cur.execute(st.session_state.db._q(
+                        f"DELETE FROM {table} WHERE patient_id = ?"),
+                        (reset_pid.strip(),))
                 if DB_BACKEND != "postgres":
                     st.session_state.db.conn.commit()
-                st.success(f"✅ Patient '{pid_clean}' deleted.")
+                st.success(f"✅ Patient '{reset_pid.strip()}' deleted.")
             except Exception as e:
                 st.error(f"Error: {e}")
 
     st.markdown("---")
 
-    # Reset All
     st.subheader("⚠️ Reset All Data")
-    st.warning("This will delete ALL patients and ALL session data permanently.")
     confirm = st.text_input("Type 'DELETE ALL' to confirm:", key="admin_reset_all")
     if st.button("🗑️ Delete Everything"):
         if confirm == "DELETE ALL":
@@ -182,169 +213,277 @@ if st.session_state.admin_mode:
     st.stop()
 
 
-# ══════════════════════════════════════════════════════
-# Login Screen
-# ══════════════════════════════════════════════════════
-if not st.session_state.started:
-    st.title("🧠 WET Therapy — Session 0")
-    st.markdown(
-        "Welcome. This is the pre-treatment assessment session for "
-        "Written Exposure Therapy (WET)."
-    )
+# ═══════════════════════════════════════════════════════
+# PAGE: Login
+# ═══════════════════════════════════════════════════════
+if st.session_state.page == "login":
+    st.title("🧠 Written Exposure Therapy")
+    st.markdown("Welcome. Enter your Patient ID to continue.")
 
     with st.form("login_form"):
-        pid = st.text_input("Enter Patient ID:", placeholder="e.g. P001")
-        start_clicked = st.form_submit_button("Start Session")
+        pid = st.text_input("Patient ID:", placeholder="e.g. P001")
+        start_clicked = st.form_submit_button("Continue")
 
     if st.button("🔧 Admin Panel"):
-        st.session_state.admin_mode = True
+        st.session_state.page = "admin"
         st.rerun()
 
     if start_clicked:
         if not pid or not pid.strip():
             st.error("Please enter a Patient ID.")
             st.stop()
-
         st.session_state.pid = pid.strip()
-
-        try:
-            with st.spinner("Starting session..."):
-                result = start_session(
-                    st.session_state.app,
-                    st.session_state.db,
-                    st.session_state.pid)
-        except Exception as e:
-            st.error(f"Error starting session: {str(e)[:200]}")
-            st.stop()
-
-        if result.get("session_complete"):
-            rebuild_chat_from_messages(result)
-            st.session_state.session_ended = True
-            st.session_state.end_reason = "complete"
-            st.session_state.started = True
-        else:
-            rebuild_chat_from_messages(result)
-            st.session_state.started = True
-
+        st.session_state.page = "progress"
         st.rerun()
 
     st.stop()
 
 
-# ══════════════════════════════════════════════════════
-# Session Ended Screen
-# ══════════════════════════════════════════════════════
-if st.session_state.session_ended:
-    st.title("🧠 WET Therapy — Session 0")
+# ═══════════════════════════════════════════════════════
+# PAGE: Progress
+# ═══════════════════════════════════════════════════════
+if st.session_state.page == "progress":
+    st.title("🧠 Written Exposure Therapy")
+
+    pid = st.session_state.pid
+    patient = st.session_state.db.get_patient(pid)
+    current_session = patient["current_session"] if patient else 0
+
+    st.markdown(f"**Patient:** {pid}")
+    st.markdown("---")
+
+    # Display session progress
+    st.subheader("📊 Treatment Progress")
+
+    for i in range(6):
+        name = SESSION_NAMES.get(i, f"Session {i}")
+        if i < current_session:
+            st.markdown(f"✅ **{name}** — Completed")
+        elif i == current_session:
+            st.markdown(f"▶ **{name}** — Ready")
+        else:
+            st.markdown(f"⬜ {name}")
+
+    if current_session > 5:
+        st.success("🎉 Treatment complete! All 6 sessions finished.")
+        st.balloons()
+        if st.button("← Back to Login"):
+            reset_to_login()
+            st.rerun()
+        st.stop()
+
+    st.markdown("---")
+
+    # Show score trajectory if available
+    sessions = st.session_state.db.get_sessions(pid)
+    if sessions:
+        pcl5_scores = [s["pcl5_score"] for s in sessions if s.get("pcl5_score") is not None]
+        phq9_scores = [s["phq9_score"] for s in sessions if s.get("phq9_score") is not None]
+        if pcl5_scores or phq9_scores:
+            with st.expander("📈 Score Trajectory"):
+                if pcl5_scores:
+                    st.markdown(f"**PCL-5:** {pcl5_scores}")
+                if phq9_scores:
+                    st.markdown(f"**PHQ-9:** {phq9_scores}")
+
+    # Start session button
+    session_name = SESSION_NAMES.get(current_session, f"Session {current_session}")
+
+    if current_session >= 1:
+        st.info("Before starting, you'll complete two brief questionnaires (PCL-5 & PHQ-9).")
+
+    if st.button(f"▶ Start {session_name}", use_container_width=True):
+        st.session_state.current_session_num = current_session
+        if current_session >= 1:
+            st.session_state.page = "questionnaire"
+        else:
+            st.session_state.page = "session"
+        st.rerun()
+
+    st.markdown("---")
+    if st.button("← Back to Login"):
+        reset_to_login()
+        st.rerun()
+
+    st.stop()
+
+
+# ═══════════════════════════════════════════════════════
+# PAGE: Questionnaire (PCL-5 + PHQ-9)
+# ═══════════════════════════════════════════════════════
+if st.session_state.page == "questionnaire":
+    session_num = st.session_state.current_session_num
+    scores = render_questionnaires(session_num)
+
+    if scores:
+        # Save scores to DB
+        pid = st.session_state.pid
+        try:
+            st.session_state.db.save_session(
+                pid, session_num,
+                pcl5_score=scores["pcl5_total"],
+                phq9_score=scores["phq9_total"])
+        except Exception:
+            pass  # Session data may be saved later in closing
+
+        st.session_state.questionnaire_scores = scores
+        st.success("✅ Questionnaires submitted!")
+        display_scores_summary(scores)
+
+        if st.button("▶ Continue to Session", use_container_width=True):
+            st.session_state.page = "session"
+            st.rerun()
+
+        st.stop()
+
+    st.stop()
+
+
+# ═══════════════════════════════════════════════════════
+# PAGE: Session Ended
+# ═══════════════════════════════════════════════════════
+if st.session_state.page == "ended":
+    session_num = st.session_state.current_session_num
+    session_name = SESSION_NAMES.get(session_num, f"Session {session_num}")
+    st.title(f"🧠 {session_name}")
 
     display_chat_history()
 
     if st.session_state.end_reason == "safety":
         st.error("⚠️ Session paused — patient referred to human clinician.")
     else:
-        st.success("✅ Session 0 complete — data saved.")
+        st.success(f"✅ {session_name} complete — data saved.")
 
     with st.expander("📋 Patient Record"):
         p = st.session_state.db.get_patient(st.session_state.pid)
         if p:
             st.json(p)
 
-    if st.button("🔄 New Patient"):
-        reset_to_login()
+    if st.button("🔄 Back to Progress", use_container_width=True):
+        reset_to_progress()
         st.rerun()
 
     st.stop()
 
 
-# ══════════════════════════════════════════════════════
-# Active Session
-# ══════════════════════════════════════════════════════
-st.title("🧠 WET Therapy — Session 0")
-st.caption(f"Patient: {st.session_state.pid}")
+# ═══════════════════════════════════════════════════════
+# PAGE: Active Session
+# ═══════════════════════════════════════════════════════
+if st.session_state.page == "session":
+    session_num = st.session_state.current_session_num
+    session_name = SESSION_NAMES.get(session_num, f"Session {session_num}")
+    pid = st.session_state.pid
 
-# Display all previous messages
-display_chat_history()
+    # Start session if chat_history is empty
+    if not st.session_state.chat_history:
+        try:
+            with st.spinner(f"Starting {session_name}..."):
+                if session_num == 0:
+                    result = start_session_s0(
+                        st.session_state.app_s0,
+                        st.session_state.db, pid)
+                else:
+                    result = start_session1(
+                        st.session_state.app_s1,
+                        st.session_state.db, pid)
+        except Exception as e:
+            st.error(f"Error: {str(e)[:200]}")
+            st.stop()
 
-# Phase 2: Process pending input (patient message already visible)
-if st.session_state.pending_input:
-    user_input = st.session_state.pending_input
-    st.session_state.pending_input = None
-
-    try:
-        with st.spinner("Therapist is thinking..."):
-            result = run_turn(
-                st.session_state.app,
-                st.session_state.pid,
-                user_input)
-    except Exception as e:
-        st.error(f"An error occurred: {str(e)[:200]}. Please try again.")
-        st.stop()
-
-    ai_msg = get_ai_msg(result)
-    label = get_step_label(result)
-
-    if result.get("current_step") == "safety_stop":
-        st.markdown(f'<div class="step-label">⚠️ Safety</div>', unsafe_allow_html=True)
-        fake_stream(ai_msg, "safety-msg")
-        st.session_state.chat_history.append(("safety", ai_msg, "⚠️ Safety"))
-        st.session_state.session_ended = True
-        st.session_state.end_reason = "safety"
-        time.sleep(1)
-        st.rerun()
-
-    elif result.get("session_complete"):
-        st.markdown(f'<div class="step-label">{label}</div>', unsafe_allow_html=True)
-        fake_stream(ai_msg)
-        st.session_state.chat_history.append(("therapist", ai_msg, label))
-        st.session_state.session_ended = True
-        st.session_state.end_reason = "complete"
-        time.sleep(1)
-        st.rerun()
-
-    else:
-        st.markdown(f'<div class="step-label">{label}</div>', unsafe_allow_html=True)
-        fake_stream(ai_msg)
-        st.session_state.chat_history.append(("therapist", ai_msg, label))
-
-    st.rerun()
-
-# Chat input
-user_input = st.chat_input("Type your response...")
-
-if user_input:
-    # Phase 1: Show patient message immediately
-    st.session_state.chat_history.append(("patient", user_input, ""))
-    st.session_state.pending_input = user_input
-    st.rerun()
-
-# Sidebar
-with st.sidebar:
-    st.markdown("### Tools")
-
-    if st.button("📊 View State"):
-        state = st.session_state.app.get_state({"configurable": {
-            "thread_id": f"patient_{st.session_state.pid}_s0"}}).values
-        st.json({
-            "current_step": state.get("current_step", ""),
-            "reason_for_therapy": state.get("reason_for_therapy", ""),
-            "trauma_described": state.get("trauma_described", False),
-            "index_trauma": state.get("index_trauma", ""),
-            "therapy_goals": state.get("therapy_goals", []),
-            "trauma_bookends": state.get("trauma_bookends", {}),
-            "avoidance_patterns": [a.get("pattern", "")
-                for a in state.get("avoidance_patterns", [])],
-            "session_complete": state.get("session_complete", False),
-        })
-
-    if st.button("📋 View DB"):
-        p = st.session_state.db.get_patient(st.session_state.pid)
-        if p:
-            st.json(p)
+        if result.get("session_complete"):
+            rebuild_chat(result, session_num)
+            st.session_state.page = "ended"
+            st.session_state.end_reason = "complete"
+            st.rerun()
         else:
-            st.warning("Patient not found in DB.")
+            rebuild_chat(result, session_num)
+            st.rerun()
 
-    st.markdown("---")
+    # Display
+    st.title(f"🧠 {session_name}")
+    st.caption(f"Patient: {pid}")
 
-    if st.button("🚪 End Session"):
-        reset_to_login()
+    display_chat_history()
+
+    # Phase 2: Process pending input
+    if st.session_state.pending_input:
+        user_input = st.session_state.pending_input
+        st.session_state.pending_input = None
+
+        try:
+            with st.spinner("Therapist is thinking..."):
+                if session_num == 0:
+                    result = run_turn_s0(
+                        st.session_state.app_s0, pid, user_input)
+                else:
+                    result = run_turn_s1(
+                        st.session_state.app_s1, pid, user_input)
+        except Exception as e:
+            st.error(f"An error occurred: {str(e)[:200]}. Please try again.")
+            st.stop()
+
+        ai_msg = get_ai_msg(result) if session_num >= 1 else get_ai_msg_s0(result)
+        label = get_step_label(result, session_num)
+
+        if result.get("current_step") == "safety_stop":
+            st.markdown('<div class="step-label">⚠️ Safety</div>', unsafe_allow_html=True)
+            fake_stream(ai_msg, "safety-msg")
+            st.session_state.chat_history.append(("safety", ai_msg, "⚠️ Safety"))
+            st.session_state.page = "ended"
+            st.session_state.end_reason = "safety"
+            time.sleep(1)
+            st.rerun()
+
+        elif result.get("session_complete"):
+            st.markdown(f'<div class="step-label">{label}</div>', unsafe_allow_html=True)
+            fake_stream(ai_msg)
+            st.session_state.chat_history.append(("therapist", ai_msg, label))
+            st.session_state.page = "ended"
+            st.session_state.end_reason = "complete"
+            time.sleep(1)
+            st.rerun()
+
+        else:
+            st.markdown(f'<div class="step-label">{label}</div>', unsafe_allow_html=True)
+            fake_stream(ai_msg)
+            st.session_state.chat_history.append(("therapist", ai_msg, label))
+
         st.rerun()
+
+    # Chat input
+    user_input = st.chat_input("Type your response...")
+
+    if user_input:
+        st.session_state.chat_history.append(("patient", user_input, ""))
+        st.session_state.pending_input = user_input
+        st.rerun()
+
+    # Sidebar
+    with st.sidebar:
+        st.markdown(f"### {session_name}")
+
+        if st.button("📊 View State"):
+            thread_id = f"patient_{pid}_s{session_num}"
+            app = st.session_state.app_s0 if session_num == 0 else st.session_state.app_s1
+            state = app.get_state({"configurable": {"thread_id": thread_id}}).values
+            st.json({
+                "current_step": state.get("current_step", ""),
+                "session": session_num,
+                "reason_for_therapy": state.get("reason_for_therapy", ""),
+                "trauma_described": state.get("trauma_described", False),
+                "index_trauma": state.get("index_trauma", ""),
+                "therapy_goals": state.get("therapy_goals", []),
+                "trauma_bookends": state.get("trauma_bookends", {}),
+                "session_complete": state.get("session_complete", False),
+            })
+
+        if st.button("📋 View DB"):
+            p = st.session_state.db.get_patient(pid)
+            if p:
+                st.json(p)
+
+        st.markdown("---")
+
+        if st.button("🚪 End Session"):
+            reset_to_progress()
+            st.rerun()
