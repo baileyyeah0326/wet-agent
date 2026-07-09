@@ -302,6 +302,11 @@ if st.session_state.page == "questionnaire":
         display_scores_summary(st.session_state.questionnaire_scores)
 
         if st.button("▶ Continue to Step 3", use_container_width=True):
+            # Add the saved Step 3 message to chat history
+            if st.session_state.get("pending_step3_msg"):
+                msg, label = st.session_state.pending_step3_msg
+                st.session_state.chat_history.append(("therapist", msg, label))
+                st.session_state.pending_step3_msg = None
             st.session_state.page = "session"
             st.rerun()
 
@@ -436,11 +441,10 @@ if st.session_state.page == "session":
             if (session_num >= 1
                     and current_step.startswith("s1_step3")
                     and not st.session_state.questionnaire_scores):
-                st.markdown(f'<div class="step-label">{label}</div>', unsafe_allow_html=True)
-                fake_stream(ai_msg)
-                st.session_state.chat_history.append(("therapist", ai_msg, label))
+                # Don't show Step 3 yet — do questionnaire first
+                # Save Step 3 message for later
+                st.session_state.pending_step3_msg = (ai_msg, label)
                 st.session_state.page = "questionnaire"
-                time.sleep(1)
                 st.rerun()
 
             st.markdown(f'<div class="step-label">{label}</div>', unsafe_allow_html=True)
