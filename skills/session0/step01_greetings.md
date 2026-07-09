@@ -13,10 +13,14 @@ Generate the opening greeting for Session 0.
 4-6 sentences. Warm and natural.
 
 ## Judge Criteria
-pass=true if ALL of these:
-1. Patient acknowledged the greeting (even briefly)
-2. Patient does NOT have an unanswered question
-3. Patient does NOT seem distressed or confused about being here
+pass=true if the patient responded to the greeting in any way.
+ 
+Examples that PASS:
+- "Hi, I'm nervous but glad to be here" → pass
+- "Hi. My doctor referred me" → pass
+- "I don't really want to be here" → pass (reluctance is fine, move on)
+This is just a greeting — do NOT require multiple turns.
+pass=true on the patient's FIRST response.
 
 ## Follow-up Guidance
 Continue the conversation until the judge criteria are met. Empathize with what the patient said and guide naturally.
