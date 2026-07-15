@@ -1,15 +1,15 @@
 """
 Standardized Questionnaires — PCL-5 and PHQ-9
 
-Administered before Sessions 1-5 to track symptom changes.
-Renders as Streamlit forms, stores scores in PatientDB.
+Split into two forms (two pages) to prevent session timeout.
+Each form submission keeps the Streamlit session alive.
 """
 
 import streamlit as st
 
-# ═══════════════════════════════════════════════════════════════════
-# PCL-5 — PTSD Checklist for DSM-5 (20 items, 0-4 scale)
-# ═══════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════
+# PCL-5
+# ═══════════════════════════════════════════════════════
 
 PCL5_INSTRUCTIONS = (
     "Below is a list of problems that people sometimes have in response "
@@ -19,13 +19,8 @@ PCL5_INSTRUCTIONS = (
     "**in the past month**."
 )
 
-PCL5_SCALE = {
-    0: "Not at all",
-    1: "A little bit",
-    2: "Moderately",
-    3: "Quite a bit",
-    4: "Extremely",
-}
+PCL5_SCALE = {0: "Not at all", 1: "A little bit", 2: "Moderately",
+              3: "Quite a bit", 4: "Extremely"}
 
 PCL5_ITEMS = [
     "Repeated, disturbing, and unwanted memories of the stressful experience?",
@@ -50,22 +45,17 @@ PCL5_ITEMS = [
     "Trouble falling or staying asleep?",
 ]
 
-
-# ═══════════════════════════════════════════════════════════════════
-# PHQ-9 — Patient Health Questionnaire (9 items, 0-3 scale)
-# ═══════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════
+# PHQ-9
+# ═══════════════════════════════════════════════════════
 
 PHQ9_INSTRUCTIONS = (
     "Over the **last 2 weeks**, how often have you been bothered "
     "by any of the following problems?"
 )
 
-PHQ9_SCALE = {
-    0: "Not at all",
-    1: "Several days",
-    2: "More than half the days",
-    3: "Nearly every day",
-}
+PHQ9_SCALE = {0: "Not at all", 1: "Several days",
+              2: "More than half the days", 3: "Nearly every day"}
 
 PHQ9_ITEMS = [
     "Little interest or pleasure in doing things",
@@ -92,125 +82,122 @@ PHQ9_DIFFICULTY_OPTIONS = [
     "Extremely difficult",
 ]
 
-
-# ═══════════════════════════════════════════════════════════════════
-# Streamlit Rendering
-# ═══════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════
+# Two-page rendering
+# ═══════════════════════════════════════════════════════
 
 def render_questionnaires(session_num: int) -> dict | None:
-    """Render PCL-5 and PHQ-9 as Streamlit forms.
-
-    Returns:
-        dict with scores if submitted, None if not yet submitted.
-        {"pcl5_scores": [int x20], "pcl5_total": int,
-         "phq9_scores": [int x9], "phq9_total": int,
-         "phq9_difficulty": str}
+    """Render PCL-5 and PHQ-9 as two separate forms.
+    
+    Page 1: PCL-5 (20 items) → submit → saves to session_state
+    Page 2: PHQ-9 (9 items) → submit → returns scores
+    
+    Each submission keeps the session alive.
     """
-    st.subheader(f"📋 Pre-Session Questionnaires (Session {session_num})")
-    st.markdown(
-        "Please complete both questionnaires before we begin today's session."
-    )
 
-    with st.form("questionnaire_form"):
-        # ── PCL-5 ──
-        st.markdown("---")
-        st.markdown("### PCL-5 — PTSD Checklist")
+    # Check if PCL-5 already done
+    pcl5_done = st.session_state.get(f"pcl5_done_s{session_num}", False)
+
+    if not pcl5_done:
+        # ── Page 1: PCL-5 ──
+        st.subheader("📋 Questionnaire 1 of 2 — PCL-5")
         st.markdown(PCL5_INSTRUCTIONS)
+        st.progress(0.0, text="Step 1 of 2")
 
-        pcl5_responses = []
-        for i, item in enumerate(PCL5_ITEMS):
-            st.markdown(f"**{i+1}.** {item}")
-            val = st.radio(
-                f"pcl5_{i+1}",
-                options=[0, 1, 2, 3, 4],
-                format_func=lambda x: f"{x} — {PCL5_SCALE[x]}",
-                horizontal=True,
-                key=f"pcl5_q{i+1}_s{session_num}",
-                label_visibility="collapsed",
-                index=None,
-            )
-            pcl5_responses.append(val)
+        with st.form(f"pcl5_form_s{session_num}"):
+            pcl5_responses = []
+            for i, item in enumerate(PCL5_ITEMS):
+                st.markdown(f"**{i+1}.** {item}")
+                val = st.radio(
+                    f"pcl5_{i+1}",
+                    options=[0, 1, 2, 3, 4],
+                    format_func=lambda x: f"{x} — {PCL5_SCALE[x]}",
+                    horizontal=True,
+                    key=f"pcl5_q{i+1}_s{session_num}",
+                    label_visibility="collapsed",
+                    index=None,
+                )
+                pcl5_responses.append(val)
 
-        # ── PHQ-9 ──
-        st.markdown("---")
-        st.markdown("### PHQ-9 — Patient Health Questionnaire")
+            submitted = st.form_submit_button(
+                "Next → PHQ-9", use_container_width=True)
+
+            if submitted:
+                if None in pcl5_responses:
+                    unanswered = [i+1 for i, v in enumerate(pcl5_responses) if v is None]
+                    st.error(f"Please answer all questions. Missing: {unanswered}")
+                    return None
+
+                st.session_state[f"pcl5_scores_s{session_num}"] = pcl5_responses
+                st.session_state[f"pcl5_total_s{session_num}"] = sum(pcl5_responses)
+                st.session_state[f"pcl5_done_s{session_num}"] = True
+                st.rerun()
+
+        return None
+
+    else:
+        # ── Page 2: PHQ-9 ──
+        pcl5_total = st.session_state.get(f"pcl5_total_s{session_num}", 0)
+        st.subheader("📋 Questionnaire 2 of 2 — PHQ-9")
+        st.markdown(f"✅ PCL-5 complete (score: {pcl5_total}/80)")
         st.markdown(PHQ9_INSTRUCTIONS)
+        st.progress(0.5, text="Step 2 of 2")
 
-        phq9_responses = []
-        for i, item in enumerate(PHQ9_ITEMS):
-            st.markdown(f"**{i+1}.** {item}")
-            val = st.radio(
-                f"phq9_{i+1}",
-                options=[0, 1, 2, 3],
-                format_func=lambda x: f"{x} — {PHQ9_SCALE[x]}",
-                horizontal=True,
-                key=f"phq9_q{i+1}_s{session_num}",
+        with st.form(f"phq9_form_s{session_num}"):
+            phq9_responses = []
+            for i, item in enumerate(PHQ9_ITEMS):
+                st.markdown(f"**{i+1}.** {item}")
+                val = st.radio(
+                    f"phq9_{i+1}",
+                    options=[0, 1, 2, 3],
+                    format_func=lambda x: f"{x} — {PHQ9_SCALE[x]}",
+                    horizontal=True,
+                    key=f"phq9_q{i+1}_s{session_num}",
+                    label_visibility="collapsed",
+                    index=None,
+                )
+                phq9_responses.append(val)
+
+            st.markdown("---")
+            st.markdown(PHQ9_DIFFICULTY)
+            difficulty = st.radio(
+                "Difficulty level",
+                options=PHQ9_DIFFICULTY_OPTIONS,
+                key=f"phq9_diff_s{session_num}",
                 label_visibility="collapsed",
                 index=None,
             )
-            phq9_responses.append(val)
 
-        # Difficulty question
-        st.markdown("---")
-        st.markdown(PHQ9_DIFFICULTY)
-        difficulty = st.radio(
-            "Difficulty level",
-            options=PHQ9_DIFFICULTY_OPTIONS,
-            key=f"phq9_diff_s{session_num}",
-            label_visibility="collapsed",
-            index=None,
-        )
+            submitted = st.form_submit_button(
+                "✅ Submit All", use_container_width=True)
 
-        # Submit
-        st.markdown("---")
-        submitted = st.form_submit_button(
-            "✅ Submit Questionnaires",
-            use_container_width=True,
-        )
+            if submitted:
+                if None in phq9_responses:
+                    unanswered = [i+1 for i, v in enumerate(phq9_responses) if v is None]
+                    st.error(f"Please answer all questions. Missing: {unanswered}")
+                    return None
+                if difficulty is None:
+                    st.error("Please answer the difficulty question.")
+                    return None
 
-        if submitted:
-            if None in pcl5_responses:
-                st.error("Please answer all PCL-5 questions before submitting.")
-                return None
-            if None in phq9_responses:
-                st.error("Please answer all PHQ-9 questions before submitting.")
-                return None
-            if difficulty is None:
-                st.error("Please answer the difficulty question.")
-                return None
+                pcl5_scores = st.session_state.get(
+                    f"pcl5_scores_s{session_num}", [])
+                phq9_total = sum(phq9_responses)
 
-            pcl5_total = sum(pcl5_responses)
-            phq9_total = sum(phq9_responses)
+                return {
+                    "pcl5_scores": pcl5_scores,
+                    "pcl5_total": pcl5_total,
+                    "phq9_scores": phq9_responses,
+                    "phq9_total": phq9_total,
+                    "phq9_difficulty": difficulty,
+                }
 
-            return {
-                "pcl5_scores": pcl5_responses,
-                "pcl5_total": pcl5_total,
-                "phq9_scores": phq9_responses,
-                "phq9_total": phq9_total,
-                "phq9_difficulty": difficulty,
-            }
-
-    return None
+        return None
 
 
 def display_scores_summary(scores: dict):
-    """Display a summary of questionnaire scores."""
     col1, col2 = st.columns(2)
     with col1:
-        pcl5_total = scores["pcl5_total"]
-        st.metric("PCL-5 Total", f"{pcl5_total} / 80")
-        if pcl5_total >= 31:
-            st.warning("Above clinical threshold (≥31)")
-        else:
-            st.success("Below clinical threshold")
+        st.metric("PCL-5 Total", f"{scores['pcl5_total']} / 80")
     with col2:
-        phq9_total = scores["phq9_total"]
-        st.metric("PHQ-9 Total", f"{phq9_total} / 27")
-        if phq9_total >= 10:
-            severity = "Moderate" if phq9_total < 15 else (
-                "Moderately severe" if phq9_total < 20 else "Severe")
-            st.warning(f"Depression severity: {severity}")
-        elif phq9_total >= 5:
-            st.info("Mild depression")
-        else:
-            st.success("Minimal depression")
+        st.metric("PHQ-9 Total", f"{scores['phq9_total']} / 27")
