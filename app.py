@@ -294,6 +294,21 @@ if st.session_state.page == "progress":
 # ═══════════════════════════════════════════════════════
 if st.session_state.page == "questionnaire":
     session_num = st.session_state.current_session_num
+    pid = st.session_state.pid
+
+    # Check DB for existing scores (in case session_state was lost/expired)
+    if not st.session_state.questionnaire_scores:
+        try:
+            existing_sessions = st.session_state.db.get_sessions(pid)
+            for s in existing_sessions:
+                if s.get("session_num") == session_num and s.get("pcl5_score") is not None:
+                    st.session_state.questionnaire_scores = {
+                        "pcl5_total": s["pcl5_score"],
+                        "phq9_total": s.get("phq9_score", 0),
+                    }
+                    break
+        except Exception:
+            pass
 
     # Already submitted — show scores and continue button
     if st.session_state.questionnaire_scores:
@@ -312,7 +327,124 @@ if st.session_state.page == "questionnaire":
 
         st.stop()
 
-    # Not yet submitted — show questionnaire form
+    # Not yet submitted — show transition message first, then form
+    if not st.session_state.get(f"questionnaire_intro_done_s{session_num}"):
+        st.markdown("### Step 2/11 — Questionnaires")
+
+        # Initialize intro chat
+        if f"intro_chat_s{session_num}" not in st.session_state:
+            st.session_state[f"intro_chat_s{session_num}"] = []
+
+        intro_chat = st.session_state[f"intro_chat_s{session_num}"]
+
+        # Show transition message
+        questionnaire_intro_text = (
+            "Before we begin today's session, I'd like to introduce something "
+            "we'll be doing at the start of each session. You'll be asked to "
+            "complete a few brief questionnaires about your symptoms and how "
+            "you've been feeling since our last meeting. These questionnaires "
+            "usually take just a few minutes to complete. Their purpose is to "
+            "help us track your progress over time. They give us an objective "
+            "way to see how your symptoms are changing, identify areas that "
+            "are improving, and notice if there are any concerns that we "
+            "should pay closer attention to. There are no right or wrong "
+            "answers. The most important thing is to answer each question as "
+            "honestly as you can based on your experiences over the past week "
+            "or two. Do you have any questions before we get started?"
+        )
+        st.markdown(
+            f'<div class="therapist-msg">{questionnaire_intro_text}</div>',
+            unsafe_allow_html=True)
+
+        # Show any follow-up conversation
+        for role, msg in intro_chat:
+            if role == "patient":
+                st.markdown(f'<div class="patient-msg">{msg}</div>',
+                            unsafe_allow_html=True)
+            else:
+                st.markdown(f'<div class="therapist-msg">{msg}</div>',
+                            unsafe_allow_html=True)
+
+        # Process pending intro response
+        if st.session_state.get("intro_pending"):
+            patient_msg = st.session_state.intro_pending
+            st.session_state.intro_pending = None
+
+            from session0 import llm
+            from langchain_core.messages import SystemMessage, HumanMessage
+
+            try:
+                result = llm.invoke([
+                    SystemMessage(content=(
+                        "You are a WET therapist. The patient was just told about "
+                        "the pre-session questionnaires (PCL-5 and PHQ-9). "
+                        "Evaluate the patient's response.\n\n"
+                        "If they said something like 'no', 'no questions', "
+                        "'let's start', 'okay', 'I'm ready' → they have no questions.\n\n"
+                        "If they asked a question → answer it briefly and warmly, "
+                        "then ask 'Ready to get started?'\n\n"
+                        "Respond in JSON:\n"
+                        '{"ready": true or false, "response": "your response"}'
+                    )),
+                    HumanMessage(content=f'Patient said: "{patient_msg}"'),
+                ]).content
+            except Exception:
+                result = '{"ready": true, "response": "Great, let us get started."}'
+
+            try:
+                import json
+                parsed = json.loads(result.replace("```json","").replace("```","").strip())
+                is_ready = parsed.get("ready", False)
+                response = parsed.get("response", "")
+            except Exception:
+                is_ready = False
+                response = "I understand. Ready to get started when you are."
+
+            if is_ready:
+                # Save LLM's final response to intro_chat
+                if response:
+                    intro_chat.append(("therapist", response))
+
+                # Add intro conversation to chat_history
+                st.session_state.chat_history.append(
+                    ("therapist", questionnaire_intro_text,
+                     "Step 2/11 — Questionnaires"))
+                for role, msg in intro_chat:
+                    if role == "patient":
+                        st.session_state.chat_history.append(("patient", msg, ""))
+                    else:
+                        st.session_state.chat_history.append(
+                            ("therapist", msg, "Step 2/11 — Questionnaires"))
+
+                # Inject into graph so LLM has context
+                try:
+                    from langchain_core.messages import AIMessage as AI, HumanMessage as HI
+                    inject_msgs = [AI(content=questionnaire_intro_text)]
+                    for role, msg in intro_chat:
+                        if role == "patient":
+                            inject_msgs.append(HI(content=msg))
+                        else:
+                            inject_msgs.append(AI(content=msg))
+                    graph_app = st.session_state.app_s1 if session_num >= 1 else st.session_state.app_s0
+                    config = {"configurable": {"thread_id": f"patient_{pid}_s{session_num}"}}
+                    graph_app.update_state(config, {"messages": inject_msgs})
+                except Exception:
+                    pass
+                st.session_state[f"questionnaire_intro_done_s{session_num}"] = True
+                st.rerun()
+            else:
+                intro_chat.append(("therapist", response))
+                st.rerun()
+
+        # Chat input for questions
+        user_input = st.chat_input("Type your response or question...")
+        if user_input:
+            intro_chat.append(("patient", user_input))
+            st.session_state.intro_pending = user_input
+            st.rerun()
+
+        st.stop()
+
     scores = render_questionnaires(session_num)
 
     if scores:
@@ -457,9 +589,18 @@ if st.session_state.page == "session":
     user_input = st.chat_input("Type your response...")
 
     if user_input:
-        st.session_state.chat_history.append(("patient", user_input, ""))
-        st.session_state.pending_input = user_input
-        st.rerun()
+        # Prevent duplicate submission
+        last_patient_msg = ""
+        for role, msg, _ in reversed(st.session_state.chat_history):
+            if role == "patient":
+                last_patient_msg = msg
+                break
+        if user_input == last_patient_msg:
+            pass  # Skip duplicate
+        else:
+            st.session_state.chat_history.append(("patient", user_input, ""))
+            st.session_state.pending_input = user_input
+            st.rerun()
 
     # Sidebar
     with st.sidebar:
