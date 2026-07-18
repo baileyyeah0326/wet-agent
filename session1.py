@@ -66,6 +66,7 @@ def _load_skill_s1(filename):
 
 SKILLS_S1 = {
     "s1_step1":  _load_skill_s1("step01_welcome.md"),
+    "s1_step2":  _load_skill_s1("step02_questionnaire_intro.md"),
     "s1_step3":  _load_skill_s1("step03_procedure_review.md"),
     "s1_step4":  _load_skill_s1("step04_bookends_review.md"),
     "s1_step5":  _load_skill_s1("step05_writing_instructions.md"),
@@ -84,6 +85,7 @@ SKILLS_S1 = {
 
 STEP_LABELS_S1 = {
     "s1_step1":  "Step 1/11  — Welcome back",
+    "s1_step2":  "Step 2/11  — Questionnaire intro",
     "s1_step3":  "Step 3/11  — General writing directions",
     "s1_step4":  "Step 4/11  — Bookends review",
     "s1_step5":  "Step 5/11  — Writing instructions",
@@ -346,6 +348,7 @@ def _make_judge_router_s1(step_name, next_prompt):
 
 STEP_DEFS_S1 = [
     ("s1_step1",  make_prompt_s1("s1_step1"),  make_judge_s1("s1_step1")),
+    ("s1_step2",  make_prompt_s1("s1_step2"),  make_judge_s1("s1_step2")),
     ("s1_step3",  make_prompt_s1("s1_step3"),  make_judge_s1("s1_step3")),
     ("s1_step4",  make_prompt_s1("s1_step4"),  make_judge_s1("s1_step4")),
     ("s1_step5",  make_prompt_s1("s1_step5"),  make_judge_s1("s1_step5")),
