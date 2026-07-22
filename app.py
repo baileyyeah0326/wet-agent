@@ -52,6 +52,27 @@ from session2 import (
     get_ai_msg as get_ai_msg_s2,
     STEP_LABELS_S2,
 )
+from session3 import (
+    create_app_s3,
+    start_session3,
+    run_turn_s3,
+    get_ai_msg as get_ai_msg_s3,
+    STEP_LABELS_S3,
+)
+from session4 import (
+    create_app_s4,
+    start_session4,
+    run_turn_s4,
+    get_ai_msg as get_ai_msg_s4,
+    STEP_LABELS_S4,
+)
+from session5 import (
+    create_app_s5,
+    start_session5,
+    run_turn_s5,
+    get_ai_msg as get_ai_msg_s5,
+    STEP_LABELS_S5,
+)
 from questionnaires import render_questionnaires, display_scores_summary
 from patient_db import DB_BACKEND
 
@@ -62,9 +83,15 @@ if "initialized" not in st.session_state:
     app_s0, db = create_app_s0()
     app_s1, _ = create_app_s1()
     app_s2, _ = create_app_s2()
+    app_s3, _ = create_app_s3()
+    app_s4, _ = create_app_s4()
+    app_s5, _ = create_app_s5()
     st.session_state.app_s0 = app_s0
     st.session_state.app_s1 = app_s1
     st.session_state.app_s2 = app_s2
+    st.session_state.app_s3 = app_s3
+    st.session_state.app_s4 = app_s4
+    st.session_state.app_s5 = app_s5
     st.session_state.db = db
     st.session_state.pid = None
     st.session_state.page = "login"
@@ -109,8 +136,14 @@ def get_step_label(result, session_num):
     labels = STEP_LABELS_S0
     if session_num == 1:
         labels = STEP_LABELS_S1
-    elif session_num >= 2:
+    elif session_num == 2:
         labels = STEP_LABELS_S2
+    elif session_num == 3:
+        labels = STEP_LABELS_S3
+    elif session_num == 4:
+        labels = STEP_LABELS_S4
+    elif session_num >= 5:
+        labels = STEP_LABELS_S5
     return labels.get(base, step)
 
 
@@ -407,9 +440,21 @@ if st.session_state.page == "session":
                     result = start_session1(
                         st.session_state.app_s1,
                         st.session_state.db, pid)
-                else:
+                elif session_num == 2:
                     result = start_session2(
                         st.session_state.app_s2,
+                        st.session_state.db, pid)
+                elif session_num == 3:
+                    result = start_session3(
+                        st.session_state.app_s3,
+                        st.session_state.db, pid)
+                elif session_num == 4:
+                    result = start_session4(
+                        st.session_state.app_s4,
+                        st.session_state.db, pid)
+                else:
+                    result = start_session5(
+                        st.session_state.app_s5,
                         st.session_state.db, pid)
         except Exception as e:
             st.error(f"Error: {str(e)[:200]}")
@@ -443,9 +488,18 @@ if st.session_state.page == "session":
                 elif session_num == 1:
                     result = run_turn_s1(
                         st.session_state.app_s1, pid, user_input)
-                else:
+                elif session_num == 2:
                     result = run_turn_s2(
                         st.session_state.app_s2, pid, user_input)
+                elif session_num == 3:
+                    result = run_turn_s3(
+                        st.session_state.app_s3, pid, user_input)
+                elif session_num == 4:
+                    result = run_turn_s4(
+                        st.session_state.app_s4, pid, user_input)
+                else:
+                    result = run_turn_s5(
+                        st.session_state.app_s5, pid, user_input)
         except Exception as e:
             st.error(f"An error occurred: {str(e)[:200]}. Please try again.")
             st.stop()
@@ -454,8 +508,14 @@ if st.session_state.page == "session":
             ai_msg = get_ai_msg_s0(result)
         elif session_num == 1:
             ai_msg = get_ai_msg(result)
-        else:
+        elif session_num == 2:
             ai_msg = get_ai_msg_s2(result)
+        elif session_num == 3:
+            ai_msg = get_ai_msg_s3(result)
+        elif session_num == 4:
+            ai_msg = get_ai_msg_s4(result)
+        else:
+            ai_msg = get_ai_msg_s5(result)
         label = get_step_label(result, session_num)
 
         if result.get("current_step") == "safety_stop":
@@ -527,8 +587,14 @@ if st.session_state.page == "session":
                 app = st.session_state.app_s0
             elif session_num == 1:
                 app = st.session_state.app_s1
-            else:
+            elif session_num == 2:
                 app = st.session_state.app_s2
+            elif session_num == 3:
+                app = st.session_state.app_s3
+            elif session_num == 4:
+                app = st.session_state.app_s4
+            else:
+                app = st.session_state.app_s5
             state = app.get_state({"configurable": {"thread_id": thread_id}}).values
             st.json({
                 "current_step": state.get("current_step", ""),

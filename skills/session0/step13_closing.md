@@ -7,6 +7,8 @@ End Session 0 on a positive, hopeful note. No patient input needed.
 Close Session 0.
 1. Confirm the bookends back to them
 2. Acknowledge their courage in sharing today
+
+## step 14
 3. Reference their SPECIFIC therapy goals
 4. Preview Session 1: "Next time, you'll do your first writing."
 5. Express genuine optimism
