@@ -45,6 +45,13 @@ from session1 import (
     get_ai_msg,
     STEP_LABELS_S1,
 )
+from session2 import (
+    create_app_s2,
+    start_session2,
+    run_turn_s2,
+    get_ai_msg as get_ai_msg_s2,
+    STEP_LABELS_S2,
+)
 from questionnaires import render_questionnaires, display_scores_summary
 from patient_db import DB_BACKEND
 
@@ -54,8 +61,10 @@ from patient_db import DB_BACKEND
 if "initialized" not in st.session_state:
     app_s0, db = create_app_s0()
     app_s1, _ = create_app_s1()
+    app_s2, _ = create_app_s2()
     st.session_state.app_s0 = app_s0
     st.session_state.app_s1 = app_s1
+    st.session_state.app_s2 = app_s2
     st.session_state.db = db
     st.session_state.pid = None
     st.session_state.page = "login"
@@ -97,7 +106,11 @@ def reset_to_progress():
 def get_step_label(result, session_num):
     step = result.get("current_step", "")
     base = step.replace("_done", "")
-    labels = STEP_LABELS_S1 if session_num >= 1 else STEP_LABELS_S0
+    labels = STEP_LABELS_S0
+    if session_num == 1:
+        labels = STEP_LABELS_S1
+    elif session_num >= 2:
+        labels = STEP_LABELS_S2
     return labels.get(base, step)
 
 
@@ -316,7 +329,8 @@ if st.session_state.page == "questionnaire":
         st.success("✅ Questionnaires submitted!")
         display_scores_summary(st.session_state.questionnaire_scores)
 
-        if st.button("▶ Continue to Step 3", use_container_width=True):
+        next_step = "Step 3" if session_num == 1 else "Step 2"
+        if st.button(f"▶ Continue to {next_step}", use_container_width=True):
             # Add the saved Step 3 message to chat history
             if st.session_state.get("pending_step3_msg"):
                 msg, label = st.session_state.pending_step3_msg
@@ -389,9 +403,13 @@ if st.session_state.page == "session":
                     result = start_session_s0(
                         st.session_state.app_s0,
                         st.session_state.db, pid)
-                else:
+                elif session_num == 1:
                     result = start_session1(
                         st.session_state.app_s1,
+                        st.session_state.db, pid)
+                else:
+                    result = start_session2(
+                        st.session_state.app_s2,
                         st.session_state.db, pid)
         except Exception as e:
             st.error(f"Error: {str(e)[:200]}")
@@ -422,14 +440,22 @@ if st.session_state.page == "session":
                 if session_num == 0:
                     result = run_turn_s0(
                         st.session_state.app_s0, pid, user_input)
-                else:
+                elif session_num == 1:
                     result = run_turn_s1(
                         st.session_state.app_s1, pid, user_input)
+                else:
+                    result = run_turn_s2(
+                        st.session_state.app_s2, pid, user_input)
         except Exception as e:
             st.error(f"An error occurred: {str(e)[:200]}. Please try again.")
             st.stop()
 
-        ai_msg = get_ai_msg(result) if session_num >= 1 else get_ai_msg_s0(result)
+        if session_num == 0:
+            ai_msg = get_ai_msg_s0(result)
+        elif session_num == 1:
+            ai_msg = get_ai_msg(result)
+        else:
+            ai_msg = get_ai_msg_s2(result)
         label = get_step_label(result, session_num)
 
         if result.get("current_step") == "safety_stop":
@@ -451,12 +477,19 @@ if st.session_state.page == "session":
             st.rerun()
 
         else:
-            # Check if Step 2 (questionnaire intro) just passed → redirect to form
+            # Redirect to questionnaire form at the right moment
             current_step = result.get("current_step", "")
-            if (session_num >= 1
-                    and current_step.startswith("s1_step3")
-                    and not st.session_state.questionnaire_scores):
-                # Don't show Step 3 yet — do questionnaire form first
+            needs_questionnaire = (
+                session_num >= 1
+                and not st.session_state.questionnaire_scores
+                and (
+                    # S1: after step2 (intro) passes → before step3
+                    (session_num == 1 and current_step.startswith("s1_step3"))
+                    # S2+: after step1 (welcome) passes → before step2 (discuss scores)
+                    or (session_num >= 2 and current_step.startswith(f"s{session_num}_step2"))
+                )
+            )
+            if needs_questionnaire:
                 st.session_state.pending_step3_msg = (ai_msg, label)
                 st.session_state.page = "questionnaire"
                 st.rerun()
@@ -490,7 +523,12 @@ if st.session_state.page == "session":
 
         if st.button("📊 View State"):
             thread_id = f"patient_{pid}_s{session_num}"
-            app = st.session_state.app_s0 if session_num == 0 else st.session_state.app_s1
+            if session_num == 0:
+                app = st.session_state.app_s0
+            elif session_num == 1:
+                app = st.session_state.app_s1
+            else:
+                app = st.session_state.app_s2
             state = app.get_state({"configurable": {"thread_id": thread_id}}).values
             st.json({
                 "current_step": state.get("current_step", ""),
