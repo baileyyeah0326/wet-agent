@@ -611,6 +611,19 @@ if st.session_state.page == "session":
             p = st.session_state.db.get_patient(pid)
             if p:
                 st.json(p)
+            sessions = st.session_state.db.get_sessions(pid)
+            if sessions:
+                st.markdown("**Session Data:**")
+                for s in sessions:
+                    st.markdown(f"Session {s.get('session_num')}:")
+                    st.json({
+                        "pcl5": s.get("pcl5_score"),
+                        "phq9": s.get("phq9_score"),
+                        "suds_pre": s.get("suds_pre"),
+                        "suds_post": s.get("suds_post"),
+                        "narrative": s.get("narrative", "")[:100] + "..." if s.get("narrative") else None,
+                        "summary": s.get("session_summary", "")[:100] + "..." if s.get("session_summary") else None,
+                    })
 
         st.markdown("---")
 
