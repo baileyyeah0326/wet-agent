@@ -13,12 +13,14 @@ Transition from step 7.
 Brief and hopeful. No logistics yet.
 
 ## Judge Criteria
-pass=true when ALL are met:
+pass=true when:
 1. Patient gave a GENUINE reaction (hope, fear, skepticism, curiosity — all fine)
-2. If they expressed concerns about writing, those were acknowledged
-3. Patient seems at least willing to learn more
-
-If they only said 'ok' without real engagement → pass=false.
+2. Patient is willing to proceed ("I'll do it", "I'll try", "Okay", etc.)
+If the patient expressed fear about writing AND willingness to proceed
+→ pass=true. The fear will be acknowledged in later steps.
+ 
+If they only said 'ok' without any engagement → pass=false.
+If they refused or said they won't do it → pass=false, gently explore concerns.
 
 ## Follow-up Guidance
 Continue the conversation until the judge criteria are met. Empathize with what the patient said and guide naturally.
