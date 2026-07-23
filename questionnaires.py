@@ -137,6 +137,9 @@ def render_questionnaires(session_num: int) -> dict | None:
 
     else:
         # ── Page 2: PHQ-9 ──
+        # Scroll to top
+        st.markdown('<script>window.parent.document.querySelector("section.main").scrollTo(0, 0);</script>',
+                    unsafe_allow_html=True)
         pcl5_total = st.session_state.get(f"pcl5_total_s{session_num}", 0)
         st.subheader("📋 Questionnaire 2 of 2 — PHQ-9")
         st.markdown(f"✅ PCL-5 complete (score: {pcl5_total}/80)")

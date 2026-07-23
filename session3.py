@@ -31,7 +31,7 @@ import session0
 # Skill Loader
 # ═══════════════════════════════════════════════════════
 
-SKILLS_DIR_S3 = Path(__file__).parent / "skills" / "session3"
+SKILLS_DIR_S3 = Path(__file__).parent / "skills" / session3
 
 
 def _load_skill(filename):
@@ -379,7 +379,10 @@ def create_app_s3():
     graph = build_session3()
     interrupt_nodes = [f"{s[0]}_prompt" for s in STEP_DEFS]
     interrupt_nodes += [f"safety_{qk}_prompt" for qk in SAFETY_QS]
-    app = graph.compile(checkpointer=checkpointer, interrupt_after=interrupt_nodes)
+    app = graph.compile(
+        checkpointer=checkpointer,
+        interrupt_after=interrupt_nodes,
+        interrupt_before=["s3_step3_prompt"])
     return app, db
 
 

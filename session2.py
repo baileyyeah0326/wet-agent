@@ -379,7 +379,10 @@ def create_app_s2():
     graph = build_session2()
     interrupt_nodes = [f"{s[0]}_prompt" for s in STEP_DEFS]
     interrupt_nodes += [f"safety_{qk}_prompt" for qk in SAFETY_QS]
-    app = graph.compile(checkpointer=checkpointer, interrupt_after=interrupt_nodes)
+    app = graph.compile(
+        checkpointer=checkpointer,
+        interrupt_after=interrupt_nodes,
+        interrupt_before=["s2_step3_prompt"])
     return app, db
 
 

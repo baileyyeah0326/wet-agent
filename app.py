@@ -364,12 +364,8 @@ if st.session_state.page == "questionnaire":
 
         next_step = "Step 3"
         if st.button(f"▶ Continue to {next_step}", use_container_width=True):
-            # Add the saved Step 3 message to chat history
-            if st.session_state.get("pending_step3_msg"):
-                msg, label = st.session_state.pending_step3_msg
-                st.session_state.chat_history.append(("therapist", msg, label))
-                st.session_state.pending_step3_msg = None
             st.session_state.page = "session"
+            st.session_state.resume_after_questionnaire = True
             st.rerun()
 
         st.stop()
@@ -475,15 +471,46 @@ if st.session_state.page == "session":
 
     display_chat_history()
 
-    # Check if patient confirmed questionnaire transition
-    if st.session_state.get("questionnaire_transition_done") and not st.session_state.questionnaire_scores:
-        # Patient's response to "Ready?" — just redirect, don't call run_turn
-        user_input = st.chat_input("Type your response...")
-        if user_input:
-            st.session_state.chat_history.append(("patient", user_input, ""))
-            st.session_state.page = "questionnaire"
+    # Resume graph after questionnaire — Step 3 will generate and fake_stream normally
+    if st.session_state.get("resume_after_questionnaire"):
+        st.session_state.resume_after_questionnaire = False
+        try:
+            with st.spinner("Therapist is thinking..."):
+                if session_num == 0:
+                    app = st.session_state.app_s0
+                elif session_num == 1:
+                    app = st.session_state.app_s1
+                elif session_num == 2:
+                    app = st.session_state.app_s2
+                elif session_num == 3:
+                    app = st.session_state.app_s3
+                elif session_num == 4:
+                    app = st.session_state.app_s4
+                else:
+                    app = st.session_state.app_s5
+                config = {"configurable": {"thread_id": f"patient_{pid}_s{session_num}"}}
+                result = app.invoke(None, config=config)
+
+            if session_num == 0:
+                ai_msg = get_ai_msg_s0(result)
+            elif session_num == 1:
+                ai_msg = get_ai_msg(result)
+            elif session_num == 2:
+                ai_msg = get_ai_msg_s2(result)
+            elif session_num == 3:
+                ai_msg = get_ai_msg_s3(result)
+            elif session_num == 4:
+                ai_msg = get_ai_msg_s4(result)
+            else:
+                ai_msg = get_ai_msg_s5(result)
+
+            label = get_step_label(result, session_num)
+            st.markdown(f'<div class="step-label">{label}</div>', unsafe_allow_html=True)
+            fake_stream(ai_msg)
+            st.session_state.chat_history.append(("therapist", ai_msg, label))
             st.rerun()
-        st.stop()
+        except Exception as e:
+            st.error(f"Error resuming: {str(e)[:200]}")
 
     # Phase 2: Process pending input
     if st.session_state.pending_input:
@@ -552,10 +579,9 @@ if st.session_state.page == "session":
             needs_questionnaire = (
                 session_num >= 1
                 and not st.session_state.questionnaire_scores
-                and current_step.startswith(f"s{session_num}_step3")
+                and current_step == f"s{session_num}_step2_done"
             )
             if needs_questionnaire:
-                st.session_state.pending_step3_msg = (ai_msg, label)
                 st.session_state.page = "questionnaire"
                 st.rerun()
 
