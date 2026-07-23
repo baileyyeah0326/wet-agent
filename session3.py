@@ -1,11 +1,11 @@
 """
-WET Agent — Session 3 (Third Writing Session)
+WET Agent — Session 2 (Second Writing Session)
 
 Same architecture as Session 1. Key differences:
-  - Step 2: Discusses questionnaire score changes
-  - Step 3: Between-session check-in
-  - Step 4: Narrative feedback from Session 2
-  - Step 5: Session 3 writing instructions (most upsetting part + life changes)
+  - Step 2: Discusses questionnaire score changes (not intro)
+  - Step 3: Between-session check-in (avoidance/approach)
+  - Step 4: Narrative feedback from Session 1
+  - Step 5: Session 2 specific writing instructions
 """
 
 from pathlib import Path
@@ -31,11 +31,11 @@ import session0
 # Skill Loader
 # ═══════════════════════════════════════════════════════
 
-SKILLS_DIR_S3 = Path(__file__).parent / "skills" / "session3"
+SKILLS_DIR_S2 = Path(__file__).parent / "skills" / "session2"
 
 
 def _load_skill(filename):
-    path = SKILLS_DIR_S3 / filename
+    path = SKILLS_DIR_S2 / filename
     if not path.exists():
         raise FileNotFoundError(f"Skill file not found: {path}")
     text = path.read_text(encoding="utf-8")
@@ -56,39 +56,41 @@ def _load_skill(filename):
     return sections
 
 
-SKILLS_S3 = {
-    "s3_step1":  _load_skill("step01_welcome.md"),
-    "s3_step2":  _load_skill("step02_questionnaire_discussion.md"),
-    "s3_step3":  _load_skill("step03_checkin.md"),
-    "s3_step4":  _load_skill("step04_narrative_feedback.md"),
-    "s3_step5":  _load_skill("step05_writing_instructions.md"),
-    "s3_step6":  _load_skill("step06_suds_pre.md"),
-    "s3_step7":  _load_skill("step07_writing_task.md"),
-    "s3_step8":  _load_skill("step08_suds_post.md"),
-    "s3_step9":  _load_skill("step09_writing_discussion.md"),
-    "s3_step10": _load_skill("step10_closing.md"),
+SKILLS_S2 = {
+    "s2_step1":  _load_skill("step01_welcome.md"),
+    "s2_step2": _load_skill("step02_qready.md"),
+    "s2_step3":  _load_skill("step03_questionnaire_discussion.md"),
+    "s2_step4":  _load_skill("step04_checkin.md"),
+    "s2_step5":  _load_skill("step05_narrative_feedback.md"),
+    "s2_step6":  _load_skill("step06_writing_instructions.md"),
+    "s2_step7":  _load_skill("step07_suds_pre.md"),
+    "s2_step8":  _load_skill("step08_writing_task.md"),
+    "s2_step9":  _load_skill("step09_suds_post.md"),
+    "s2_step10":  _load_skill("step10_writing_discussion.md"),
+    "s2_step11": _load_skill("step11_closing.md"),
 }
 
-STEP_LABELS_S3 = {
-    "s3_step1":  "Step 1/10  — Welcome back",
-    "s3_step2":  "Step 2/10  — Score discussion",
-    "s3_step3":  "Step 3/10  — Between-session check-in",
-    "s3_step4":  "Step 4/10  — Narrative feedback",
-    "s3_step5":  "Step 5/10  — Writing instructions",
-    "s3_step6":  "Step 6/10  — Pre-writing SUDs",
-    "s3_step7":  "Step 7/10  — Writing task",
-    "s3_step8":  "Step 8/10  — Post-writing SUDs",
-    "s3_step9":  "Step 9/10  — Writing discussion",
-    "s3_step10": "Step 10/10 — Closing",
+STEP_LABELS_S2 = {
+    "s2_step1":  "Step 1/11  — Welcome back",
+    "s2_step2":  "Step 2/11  — Questionnaire readiness",
+    "s2_step3":  "Step 3/11  — Score discussion",
+    "s2_step4":  "Step 4/11  — Between-session check-in",
+    "s2_step5":  "Step 5/11  — Narrative feedback",
+    "s2_step6":  "Step 6/11  — Writing instructions",
+    "s2_step7":  "Step 7/11  — Pre-writing SUDs",
+    "s2_step8":  "Step 8/11  — Writing task",
+    "s2_step9":  "Step 9/11  — Post-writing SUDs",
+    "s2_step10": "Step 10/11 — Writing discussion",
+    "s2_step11": "Step 11/11 — Closing",
 }
 
 
 # ═══════════════════════════════════════════════════════
-# make_prompt / make_judge (Session 3)
+# make_prompt / make_judge (Session 2)
 # ═══════════════════════════════════════════════════════
 
 def _parse_extract_spec(step_name):
-    raw = SKILLS_S3[step_name].get("data_to_extract", "")
+    raw = SKILLS_S2[step_name].get("data_to_extract", "")
     if not raw or raw.strip().lower() == "none":
         return {"fields": [], "observation": None}
     fields = []
@@ -117,7 +119,7 @@ def _parse_extract_spec(step_name):
 def make_prompt(step_name):
     def prompt_fn(state):
         if state.get("current_step") != step_name:
-            skill = SKILLS_S3[step_name]
+            skill = SKILLS_S2[step_name]
             task = f"[TASK] {skill.get('prompt_task', 'Continue.')}"
             notes = skill.get("clinical_notes", "")
             if notes:
@@ -137,7 +139,7 @@ def make_prompt(step_name):
                 last_narrative = state["narratives"][-1]
                 task += f"\n\nPREVIOUS NARRATIVE:\n{last_narrative[:2000]}"
             content = _llm(state, task)
-            label = STEP_LABELS_S3.get(step_name, step_name)
+            label = STEP_LABELS_S2.get(step_name, step_name)
             return {"current_step": step_name, "awaiting_input": True,
                     "messages": [_ai_msg(content, label)]}
         return {"current_step": step_name, "messages": []}
@@ -153,7 +155,7 @@ def make_judge(step_name):
             return {"current_step": "safety_q1",
                     "safety_return_step": step_name, "messages": []}
 
-        skill = SKILLS_S3[step_name]
+        skill = SKILLS_S2[step_name]
         criteria = skill.get("judge_criteria", "pass=true if patient responded.")
         follow_guidance = skill.get("follow_up_guidance", "")
         json_schema = _build_json_schema(spec)
@@ -175,7 +177,7 @@ def make_judge(step_name):
         if not result.get("pass", True):
             fu = _get_follow_up(state, result,
                 f"[TASK] Respond for {step_name}. 2-3 sentences.")
-            label = STEP_LABELS_S3.get(step_name, step_name)
+            label = STEP_LABELS_S2.get(step_name, step_name)
             return {"current_step": step_name,
                     "messages": [_ai_msg(fu, label)]}
 
@@ -186,19 +188,19 @@ def make_judge(step_name):
             if val is not None:
                 updates[f["name"]] = val
 
-        if step_name == "s3_step6" and result.get("suds_pre"):
+        if step_name == "s2_step7" and result.get("suds_pre"):
             try:
                 updates["suds_pre"] = state.get("suds_pre", []) + [int(result["suds_pre"])]
             except (ValueError, TypeError):
                 pass
 
-        if step_name == "s3_step8" and result.get("suds_post"):
+        if step_name == "s2_step9" and result.get("suds_post"):
             try:
                 updates["suds_post"] = state.get("suds_post", []) + [int(result["suds_post"])]
             except (ValueError, TypeError):
                 pass
 
-        if step_name == "s3_step7" and result.get("narrative"):
+        if step_name == "s2_step8" and result.get("narrative"):
             updates["narratives"] = state.get("narratives", []) + [result["narrative"]]
 
         if spec["observation"]:
@@ -223,8 +225,8 @@ def make_judge(step_name):
 # Step 10: Closing (no judge)
 # ═══════════════════════════════════════════════════════
 
-def step10_closing(state):
-    skill = SKILLS_S3["s3_step10"]
+def step11_closing(state):
+    skill = SKILLS_S2["s2_step11"]
     task = f"[TASK] {skill.get('prompt_task', 'Close.')}"
     notes = skill.get("clinical_notes", "")
     if notes:
@@ -232,25 +234,25 @@ def step10_closing(state):
     content = _llm(state, task)
 
     summary = _llm_json(state, (
-        "[TASK] Generate clinical summary for Session 3.\n"
+        "[TASK] Generate clinical summary for Session 2.\n"
         f"Pre-writing SUDs: {state.get('suds_pre', [])}\n"
         f"Post-writing SUDs: {state.get('suds_post', [])}\n"
         "JSON only:\n"
         '{"summary": "100-word summary", "next_priorities": ["p1","p2"]}'
-    ), {"summary": "Session 3 completed.", "next_priorities": []})
+    ), {"summary": "Session 2 completed.", "next_priorities": []})
 
     session_summary = {
-        "session": 3,
+        "session": 2,
         "summary": summary.get("summary", ""),
         "timestamp": datetime.now().isoformat(),
     }
 
     updates = {
-        "current_step": "s3_step10_done",
+        "current_step": "s2_step11_done",
         "session_complete": True,
-        "messages": [_ai_msg(content, STEP_LABELS_S3.get("s3_step10", "Closing"))],
+        "messages": [_ai_msg(content, STEP_LABELS_S2.get("s2_step11", "Closing"))],
         "session_summaries": state.get("session_summaries", []) + [session_summary],
-        "clinical_observations": _add_obs(state, "session3_complete", summary.get("summary", "")),
+        "clinical_observations": _add_obs(state, "session2_complete", summary.get("summary", "")),
     }
 
     db = session0._db
@@ -265,7 +267,7 @@ def step10_closing(state):
             suds_post=suds_post[-1] if suds_post else None,
             narrative=narratives[-1] if narratives else None,
             session_summary=summary.get("summary", ""))
-        db.add_observation(pid, session_num, "session3_complete", summary.get("summary", ""))
+        db.add_observation(pid, session_num, "session2_complete", summary.get("summary", ""))
         db.update_patient(pid, current_session=session_num + 1)
 
     return updates
@@ -287,18 +289,19 @@ def _make_judge_router(step_name, next_prompt):
 
 
 STEP_DEFS = [
-    ("s3_step1",  make_prompt("s3_step1"),  make_judge("s3_step1")),
-    ("s3_step2",  make_prompt("s3_step2"),  make_judge("s3_step2")),
-    ("s3_step3",  make_prompt("s3_step3"),  make_judge("s3_step3")),
-    ("s3_step4",  make_prompt("s3_step4"),  make_judge("s3_step4")),
-    ("s3_step5",  make_prompt("s3_step5"),  make_judge("s3_step5")),
-    ("s3_step6",  make_prompt("s3_step6"),  make_judge("s3_step6")),
-    ("s3_step7",  make_prompt("s3_step7"),  make_judge("s3_step7")),
-    ("s3_step8",  make_prompt("s3_step8"),  make_judge("s3_step8")),
-    ("s3_step9",  make_prompt("s3_step9"),  make_judge("s3_step9")),
+    ("s2_step1",  make_prompt("s2_step1"),  make_judge("s2_step1")),
+    ("s2_step2", make_prompt("s2_step2"), make_judge("s2_step2")),
+    ("s2_step3",  make_prompt("s2_step3"),  make_judge("s2_step3")),
+    ("s2_step4",  make_prompt("s2_step4"),  make_judge("s2_step4")),
+    ("s2_step5",  make_prompt("s2_step5"),  make_judge("s2_step5")),
+    ("s2_step6",  make_prompt("s2_step6"),  make_judge("s2_step6")),
+    ("s2_step7",  make_prompt("s2_step7"),  make_judge("s2_step7")),
+    ("s2_step8",  make_prompt("s2_step8"),  make_judge("s2_step8")),
+    ("s2_step9",  make_prompt("s2_step9"),  make_judge("s2_step9")),
+    ("s2_step10",  make_prompt("s2_step10"),  make_judge("s2_step10")),
 ]
 
-SAFETY_ROUTERS_S3 = {
+SAFETY_ROUTERS = {
     "q1": _safety_q1_router, "q2": _safety_q2_router,
     "q3": _safety_q3_router, "q4": _safety_q4_router,
     "q5": _safety_q5_router, "q6": _safety_q6_router,
@@ -306,36 +309,36 @@ SAFETY_ROUTERS_S3 = {
 }
 
 
-def build_session3():
+def build_session2():
     g = StateGraph(WETState)
 
     for name, pfn, jfn in STEP_DEFS:
         g.add_node(f"{name}_prompt", pfn)
         g.add_node(f"{name}_judge", jfn)
-    g.add_node("s3_step10_closing", step10_closing)
+    g.add_node("s2_step11_closing", step11_closing)
 
     for qk in SAFETY_QS:
         g.add_node(f"safety_{qk}_prompt", _make_safety_prompt(qk))
         g.add_node(f"safety_{qk}_judge", _make_safety_judge(qk))
     g.add_node("safety_result", _safety_result_node)
 
-    g.add_edge(START, "s3_step1_prompt")
+    g.add_edge(START, "s2_step1_prompt")
 
     for i, (name, _, _) in enumerate(STEP_DEFS):
         g.add_edge(f"{name}_prompt", f"{name}_judge")
-        nxt = f"{STEP_DEFS[i+1][0]}_prompt" if i < len(STEP_DEFS) - 1 else "s3_step10_closing"
+        nxt = f"{STEP_DEFS[i+1][0]}_prompt" if i < len(STEP_DEFS) - 1 else "s2_step11_closing"
         g.add_conditional_edges(f"{name}_judge",
             _make_judge_router(name, nxt),
             {nxt: nxt, f"{name}_prompt": f"{name}_prompt",
              "safety_q1_prompt": "safety_q1_prompt"})
 
-    g.add_edge("s3_step10_closing", END)
+    g.add_edge("s2_step11_closing", END)
 
     for qk in SAFETY_QS:
         g.add_edge(f"safety_{qk}_prompt", f"safety_{qk}_judge")
 
     for qk in SAFETY_QS:
-        router = SAFETY_ROUTERS_S3[qk]
+        router = SAFETY_ROUTERS[qk]
         possible = set()
         if qk == "q1": possible = {"safety_q1_prompt", "safety_q2_prompt"}
         elif qk == "q2": possible = {"safety_q2_prompt", "safety_q3_prompt", "safety_q6_prompt"}
@@ -352,7 +355,7 @@ def build_session3():
     def _safety_result_router(state):
         if state.get("current_step") == "safety_stop":
             return "safety_stop"
-        return f"{state.get('safety_return_step', 's3_step1')}_prompt"
+        return f"{state.get('safety_return_step', 's2_step1')}_prompt"
 
     g.add_conditional_edges("safety_result", _safety_result_router, all_prompts)
     return g
@@ -365,7 +368,7 @@ def build_session3():
 DB_DIR = Path(__file__).parent / "data"
 
 
-def create_app_s3():
+def create_app_s2():
     import sqlite3
     DB_DIR.mkdir(exist_ok=True)
     conn = sqlite3.connect(str(DB_DIR / "checkpoints.db"), check_same_thread=False)
@@ -373,15 +376,15 @@ def create_app_s3():
     db = PatientDB(str(DB_DIR / "patients.db"))
     session0._db = db
 
-    graph = build_session3()
+    graph = build_session2()
     interrupt_nodes = [f"{s[0]}_prompt" for s in STEP_DEFS]
     interrupt_nodes += [f"safety_{qk}_prompt" for qk in SAFETY_QS]
     app = graph.compile(checkpointer=checkpointer, interrupt_after=interrupt_nodes)
     return app, db
 
 
-def start_session3(app, db, pid):
-    config = {"configurable": {"thread_id": f"patient_{pid}_s3"}}
+def start_session2(app, db, pid):
+    config = {"configurable": {"thread_id": f"patient_{pid}_s2"}}
 
     existing = app.get_state(config)
     if existing and existing.values and existing.values.get("current_step"):
@@ -404,7 +407,7 @@ def start_session3(app, db, pid):
                  if s.get("phq9_score") is not None]
 
     return app.invoke({
-        "current_session": 3, "current_step": "", "session_complete": False,
+        "current_session": 2, "current_step": "", "session_complete": False,
         "awaiting_input": False, "patient_id": pid,
         "index_trauma": patient.get("index_trauma", "") if patient else "",
         "trauma_described": patient.get("trauma_described", False) if patient else False,
@@ -425,8 +428,8 @@ def start_session3(app, db, pid):
     }, config=config)
 
 
-def run_turn_s3(app, pid, message):
-    config = {"configurable": {"thread_id": f"patient_{pid}_s3"}}
+def run_turn_s2(app, pid, message):
+    config = {"configurable": {"thread_id": f"patient_{pid}_s2"}}
     app.update_state(config, {"messages": [HumanMessage(content=message)]})
     return app.invoke(None, config=config)
 

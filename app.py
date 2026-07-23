@@ -362,7 +362,7 @@ if st.session_state.page == "questionnaire":
         st.success("✅ Questionnaires submitted!")
         display_scores_summary(st.session_state.questionnaire_scores)
 
-        next_step = "Step 3" if session_num == 1 else "Step 2"
+        next_step = "Step 3"
         if st.button(f"▶ Continue to {next_step}", use_container_width=True):
             # Add the saved Step 3 message to chat history
             if st.session_state.get("pending_step3_msg"):
@@ -475,6 +475,16 @@ if st.session_state.page == "session":
 
     display_chat_history()
 
+    # Check if patient confirmed questionnaire transition
+    if st.session_state.get("questionnaire_transition_done") and not st.session_state.questionnaire_scores:
+        # Patient's response to "Ready?" — just redirect, don't call run_turn
+        user_input = st.chat_input("Type your response...")
+        if user_input:
+            st.session_state.chat_history.append(("patient", user_input, ""))
+            st.session_state.page = "questionnaire"
+            st.rerun()
+        st.stop()
+
     # Phase 2: Process pending input
     if st.session_state.pending_input:
         user_input = st.session_state.pending_input
@@ -542,12 +552,7 @@ if st.session_state.page == "session":
             needs_questionnaire = (
                 session_num >= 1
                 and not st.session_state.questionnaire_scores
-                and (
-                    # S1: after step2 (intro) passes → before step3
-                    (session_num == 1 and current_step.startswith("s1_step3"))
-                    # S2+: after step1 (welcome) passes → before step2 (discuss scores)
-                    or (session_num >= 2 and current_step.startswith(f"s{session_num}_step2"))
-                )
+                and current_step.startswith(f"s{session_num}_step3")
             )
             if needs_questionnaire:
                 st.session_state.pending_step3_msg = (ai_msg, label)
@@ -615,14 +620,14 @@ if st.session_state.page == "session":
             if sessions:
                 st.markdown("**Session Data:**")
                 for s in sessions:
-                    st.markdown(f"Session {s.get('session_num')}:")
+                    st.markdown(f"**Session {s.get('session_num')}:**")
                     st.json({
                         "pcl5": s.get("pcl5_score"),
                         "phq9": s.get("phq9_score"),
                         "suds_pre": s.get("suds_pre"),
                         "suds_post": s.get("suds_post"),
-                        "narrative": s.get("narrative", "")[:100] + "..." if s.get("narrative") else None,
-                        "summary": s.get("session_summary", "")[:100] + "..." if s.get("session_summary") else None,
+                        "narrative": (s.get("narrative", "") or "")[:100] + "..." if s.get("narrative") else None,
+                        "summary": (s.get("session_summary", "") or "")[:100] + "..." if s.get("session_summary") else None,
                     })
 
         st.markdown("---")

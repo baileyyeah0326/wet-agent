@@ -31,7 +31,7 @@ import session0
 # Skill Loader
 # ═══════════════════════════════════════════════════════
 
-SKILLS_DIR_S4 = Path(__file__).parent / "skills" / "session4"
+SKILLS_DIR_S4 = Path(__file__).parent / "skills" / session4
 
 
 def _load_skill(filename):
@@ -58,28 +58,30 @@ def _load_skill(filename):
 
 SKILLS_S4 = {
     "s4_step1":  _load_skill("step01_welcome.md"),
-    "s4_step2":  _load_skill("step02_questionnaire_discussion.md"),
-    "s4_step3":  _load_skill("step03_checkin.md"),
-    "s4_step4":  _load_skill("step04_narrative_feedback.md"),
-    "s4_step5":  _load_skill("step05_writing_instructions.md"),
-    "s4_step6":  _load_skill("step06_suds_pre.md"),
-    "s4_step7":  _load_skill("step07_writing_task.md"),
-    "s4_step8":  _load_skill("step08_suds_post.md"),
-    "s4_step9":  _load_skill("step09_writing_discussion.md"),
-    "s4_step10": _load_skill("step10_closing.md"),
+    "s4_step2": _load_skill("step02_qready.md"),
+    "s4_step3":  _load_skill("step03_questionnaire_discussion.md"),
+    "s4_step4":  _load_skill("step04_checkin.md"),
+    "s4_step5":  _load_skill("step05_narrative_feedback.md"),
+    "s4_step6":  _load_skill("step06_writing_instructions.md"),
+    "s4_step7":  _load_skill("step07_suds_pre.md"),
+    "s4_step8":  _load_skill("step08_writing_task.md"),
+    "s4_step9":  _load_skill("step09_suds_post.md"),
+    "s4_step10":  _load_skill("step10_writing_discussion.md"),
+    "s4_step11": _load_skill("step11_closing.md"),
 }
 
 STEP_LABELS_S4 = {
-    "s4_step1":  "Step 1/10  — Welcome back",
-    "s4_step2":  "Step 2/10  — Score discussion",
-    "s4_step3":  "Step 3/10  — Between-session check-in",
-    "s4_step4":  "Step 4/10  — Narrative feedback",
-    "s4_step5":  "Step 5/10  — Writing instructions",
-    "s4_step6":  "Step 6/10  — Pre-writing SUDs",
-    "s4_step7":  "Step 7/10  — Writing task",
-    "s4_step8":  "Step 8/10  — Post-writing SUDs",
-    "s4_step9":  "Step 9/10  — Writing discussion",
-    "s4_step10": "Step 10/10 — Closing",
+    "s4_step1":  "Step 1/11  — Welcome back",
+    "s4_step2":  "Step 2/11  — Questionnaire readiness",
+    "s4_step3":  "Step 3/11  — Score discussion",
+    "s4_step4":  "Step 4/11  — Between-session check-in",
+    "s4_step5":  "Step 5/11  — Narrative feedback",
+    "s4_step6":  "Step 6/11  — Writing instructions",
+    "s4_step7":  "Step 7/11  — Pre-writing SUDs",
+    "s4_step8":  "Step 8/11  — Writing task",
+    "s4_step9":  "Step 9/11  — Post-writing SUDs",
+    "s4_step10": "Step 10/11 — Writing discussion",
+    "s4_step11": "Step 11/11 — Closing",
 }
 
 
@@ -186,19 +188,19 @@ def make_judge(step_name):
             if val is not None:
                 updates[f["name"]] = val
 
-        if step_name == "s4_step6" and result.get("suds_pre"):
+        if step_name == "s4_step7" and result.get("suds_pre"):
             try:
                 updates["suds_pre"] = state.get("suds_pre", []) + [int(result["suds_pre"])]
             except (ValueError, TypeError):
                 pass
 
-        if step_name == "s4_step8" and result.get("suds_post"):
+        if step_name == "s4_step9" and result.get("suds_post"):
             try:
                 updates["suds_post"] = state.get("suds_post", []) + [int(result["suds_post"])]
             except (ValueError, TypeError):
                 pass
 
-        if step_name == "s4_step7" and result.get("narrative"):
+        if step_name == "s4_step8" and result.get("narrative"):
             updates["narratives"] = state.get("narratives", []) + [result["narrative"]]
 
         if spec["observation"]:
@@ -223,8 +225,8 @@ def make_judge(step_name):
 # Step 10: Closing (no judge)
 # ═══════════════════════════════════════════════════════
 
-def step10_closing(state):
-    skill = SKILLS_S4["s4_step10"]
+def step11_closing(state):
+    skill = SKILLS_S4["s4_step11"]
     task = f"[TASK] {skill.get('prompt_task', 'Close.')}"
     notes = skill.get("clinical_notes", "")
     if notes:
@@ -246,9 +248,9 @@ def step10_closing(state):
     }
 
     updates = {
-        "current_step": "s4_step10_done",
+        "current_step": "s4_step11_done",
         "session_complete": True,
-        "messages": [_ai_msg(content, STEP_LABELS_S4.get("s4_step10", "Closing"))],
+        "messages": [_ai_msg(content, STEP_LABELS_S4.get("s4_step11", "Closing"))],
         "session_summaries": state.get("session_summaries", []) + [session_summary],
         "clinical_observations": _add_obs(state, "session4_complete", summary.get("summary", "")),
     }
@@ -288,7 +290,7 @@ def _make_judge_router(step_name, next_prompt):
 
 STEP_DEFS = [
     ("s4_step1",  make_prompt("s4_step1"),  make_judge("s4_step1")),
-    ("s4_step2",  make_prompt("s4_step2"),  make_judge("s4_step2")),
+    ("s4_step2", make_prompt("s4_step2"), make_judge("s4_step2")),
     ("s4_step3",  make_prompt("s4_step3"),  make_judge("s4_step3")),
     ("s4_step4",  make_prompt("s4_step4"),  make_judge("s4_step4")),
     ("s4_step5",  make_prompt("s4_step5"),  make_judge("s4_step5")),
@@ -296,6 +298,7 @@ STEP_DEFS = [
     ("s4_step7",  make_prompt("s4_step7"),  make_judge("s4_step7")),
     ("s4_step8",  make_prompt("s4_step8"),  make_judge("s4_step8")),
     ("s4_step9",  make_prompt("s4_step9"),  make_judge("s4_step9")),
+    ("s4_step10",  make_prompt("s4_step10"),  make_judge("s4_step10")),
 ]
 
 SAFETY_ROUTERS_S4 = {
@@ -312,7 +315,7 @@ def build_session4():
     for name, pfn, jfn in STEP_DEFS:
         g.add_node(f"{name}_prompt", pfn)
         g.add_node(f"{name}_judge", jfn)
-    g.add_node("s4_step10_closing", step10_closing)
+    g.add_node("s4_step11_closing", step11_closing)
 
     for qk in SAFETY_QS:
         g.add_node(f"safety_{qk}_prompt", _make_safety_prompt(qk))
@@ -323,13 +326,13 @@ def build_session4():
 
     for i, (name, _, _) in enumerate(STEP_DEFS):
         g.add_edge(f"{name}_prompt", f"{name}_judge")
-        nxt = f"{STEP_DEFS[i+1][0]}_prompt" if i < len(STEP_DEFS) - 1 else "s4_step10_closing"
+        nxt = f"{STEP_DEFS[i+1][0]}_prompt" if i < len(STEP_DEFS) - 1 else "s4_step11_closing"
         g.add_conditional_edges(f"{name}_judge",
             _make_judge_router(name, nxt),
             {nxt: nxt, f"{name}_prompt": f"{name}_prompt",
              "safety_q1_prompt": "safety_q1_prompt"})
 
-    g.add_edge("s4_step10_closing", END)
+    g.add_edge("s4_step11_closing", END)
 
     for qk in SAFETY_QS:
         g.add_edge(f"safety_{qk}_prompt", f"safety_{qk}_judge")
