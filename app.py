@@ -469,6 +469,60 @@ if st.session_state.page == "session":
     st.title(f"🧠 {session_name}")
     st.caption(f"Patient: {pid}")
 
+    # Sidebar (render first so it's always visible)
+    with st.sidebar:
+        st.markdown(f"### {session_name}")
+
+        if st.button("📊 View State"):
+            thread_id = f"patient_{pid}_s{session_num}"
+            if session_num == 0:
+                app = st.session_state.app_s0
+            elif session_num == 1:
+                app = st.session_state.app_s1
+            elif session_num == 2:
+                app = st.session_state.app_s2
+            elif session_num == 3:
+                app = st.session_state.app_s3
+            elif session_num == 4:
+                app = st.session_state.app_s4
+            else:
+                app = st.session_state.app_s5
+            state = app.get_state({"configurable": {"thread_id": thread_id}}).values
+            st.json({
+                "current_step": state.get("current_step", ""),
+                "session": session_num,
+                "reason_for_therapy": state.get("reason_for_therapy", ""),
+                "trauma_described": state.get("trauma_described", False),
+                "index_trauma": state.get("index_trauma", ""),
+                "therapy_goals": state.get("therapy_goals", []),
+                "trauma_bookends": state.get("trauma_bookends", {}),
+                "session_complete": state.get("session_complete", False),
+            })
+
+        if st.button("📋 View DB"):
+            p = st.session_state.db.get_patient(pid)
+            if p:
+                st.json(p)
+            sessions = st.session_state.db.get_sessions(pid)
+            if sessions:
+                st.markdown("**Session Data:**")
+                for s in sessions:
+                    st.markdown(f"**Session {s.get('session_num')}:**")
+                    st.json({
+                        "pcl5": s.get("pcl5_score"),
+                        "phq9": s.get("phq9_score"),
+                        "suds_pre": s.get("suds_pre"),
+                        "suds_post": s.get("suds_post"),
+                        "narrative": (s.get("narrative", "") or "")[:100] + "..." if s.get("narrative") else None,
+                        "summary": (s.get("session_summary", "") or "")[:100] + "..." if s.get("session_summary") else None,
+                    })
+
+        st.markdown("---")
+
+        if st.button("🚪 End Session"):
+            reset_to_progress()
+            st.rerun()
+
     display_chat_history()
 
     # Resume graph after questionnaire — Step 3 will generate and fake_stream normally
@@ -606,58 +660,4 @@ if st.session_state.page == "session":
         else:
             st.session_state.chat_history.append(("patient", user_input, ""))
             st.session_state.pending_input = user_input
-            st.rerun()
-
-    # Sidebar
-    with st.sidebar:
-        st.markdown(f"### {session_name}")
-
-        if st.button("📊 View State"):
-            thread_id = f"patient_{pid}_s{session_num}"
-            if session_num == 0:
-                app = st.session_state.app_s0
-            elif session_num == 1:
-                app = st.session_state.app_s1
-            elif session_num == 2:
-                app = st.session_state.app_s2
-            elif session_num == 3:
-                app = st.session_state.app_s3
-            elif session_num == 4:
-                app = st.session_state.app_s4
-            else:
-                app = st.session_state.app_s5
-            state = app.get_state({"configurable": {"thread_id": thread_id}}).values
-            st.json({
-                "current_step": state.get("current_step", ""),
-                "session": session_num,
-                "reason_for_therapy": state.get("reason_for_therapy", ""),
-                "trauma_described": state.get("trauma_described", False),
-                "index_trauma": state.get("index_trauma", ""),
-                "therapy_goals": state.get("therapy_goals", []),
-                "trauma_bookends": state.get("trauma_bookends", {}),
-                "session_complete": state.get("session_complete", False),
-            })
-
-        if st.button("📋 View DB"):
-            p = st.session_state.db.get_patient(pid)
-            if p:
-                st.json(p)
-            sessions = st.session_state.db.get_sessions(pid)
-            if sessions:
-                st.markdown("**Session Data:**")
-                for s in sessions:
-                    st.markdown(f"**Session {s.get('session_num')}:**")
-                    st.json({
-                        "pcl5": s.get("pcl5_score"),
-                        "phq9": s.get("phq9_score"),
-                        "suds_pre": s.get("suds_pre"),
-                        "suds_post": s.get("suds_post"),
-                        "narrative": (s.get("narrative", "") or "")[:100] + "..." if s.get("narrative") else None,
-                        "summary": (s.get("session_summary", "") or "")[:100] + "..." if s.get("session_summary") else None,
-                    })
-
-        st.markdown("---")
-
-        if st.button("🚪 End Session"):
-            reset_to_progress()
             st.rerun()
