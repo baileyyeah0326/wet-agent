@@ -31,7 +31,7 @@ import session0
 # Skill Loader
 # ═══════════════════════════════════════════════════════
 
-SKILLS_DIR_S4 = Path(__file__).parent / "skills" / session4
+SKILLS_DIR_S4 = Path(__file__).parent / "skills" / "session4"
 
 
 def _load_skill(filename):
